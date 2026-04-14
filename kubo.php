@@ -148,7 +148,7 @@ render_header('Kubo Rentals', 'kubo');
         <input type="date" name="date" value="<?php echo h($selectedDate); ?>" onchange="this.form.submit()" style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
       </form>
       <div class="field">
-        <a class="btn btn--ghost" href="export_kubo.php?from=<?php echo urlencode($selectedDate); ?>&to=<?php echo urlencode($selectedDate); ?>" target="_blank" style="color:#22c55e; border-color:#22c55e;">Export Excel</a>
+        <a class="btn btn--ghost" href="exports/export_kubo.php?from=<?php echo urlencode($selectedDate); ?>&to=<?php echo urlencode($selectedDate); ?>" target="_blank" style="color:#22c55e; border-color:#22c55e;">Export Excel</a>
       </div>
     <?php endif; ?>
   </div>

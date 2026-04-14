@@ -72,7 +72,7 @@ render_header('Transactions', 'transactions');
     </div>
     <div class="spacer"></div>
     <div style="display: flex; gap: 10px;">
-      <a class="btn" href="export_transactions.php?<?php echo http_build_query($_GET); ?>" target="_blank" style="background-color: #22c55e; color: white; border: none;">
+      <a class="btn" href="exports/export_transactions.php?<?php echo http_build_query($_GET); ?>" target="_blank" style="background-color: #22c55e; color: white; border: none;">
         Export CSV
       </a>
       <?php if (!empty($_GET['customer_id'])): ?>

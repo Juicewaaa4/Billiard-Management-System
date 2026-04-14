@@ -1243,7 +1243,7 @@ render_header('Tables', 'tables');
     btn.disabled = true;
     btn.textContent = '...';
 
-    fetch('api_customers.php', {
+    fetch('api/api_customers.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'action=add_customer&name=' + encodeURIComponent(name)

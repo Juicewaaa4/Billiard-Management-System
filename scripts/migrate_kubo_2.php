@@ -1,5 +1,5 @@
 <?php
-require 'config/database.php';
+require '../config/database.php';
 try {
   $pdo = db();
   $pdo->exec("TRUNCATE TABLE kubo_rentals;");

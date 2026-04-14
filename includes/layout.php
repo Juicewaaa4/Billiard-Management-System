@@ -239,7 +239,7 @@ function render_footer(): void
       }
 
       function checkTimeoutsGlobally() {
-        fetch('api_check_timeouts.php')
+        fetch('api/api_check_timeouts.php')
           .then(res => res.json())
           .then(data => {
             if (data.status === 'ok') {

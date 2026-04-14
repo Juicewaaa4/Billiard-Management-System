@@ -539,7 +539,7 @@ function exportReservation(shift) {
   const morningStart = document.getElementById('morningStart') ? document.getElementById('morningStart').value : '08:00';
   const eveningStart = document.getElementById('eveningStart') ? document.getElementById('eveningStart').value : '16:30';
   
-  const url = 'export_reservations.php'
+  const url = 'exports/export_reservations.php'
     + '?from=' + encodeURIComponent(filterDate)
     + '&to=' + encodeURIComponent(filterDate)
     + '&status=' + encodeURIComponent(filterStatus)

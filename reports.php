@@ -158,7 +158,7 @@ render_header('Reports', 'reports');
       </div>
     </div>
 
-    <form method="get" action="export_transactions.php" class="row" style="margin-top:12px; gap:10px;">
+    <form method="get" action="exports/export_transactions.php" class="row" style="margin-top:12px; gap:10px;">
       <div class="field" style="min-width:140px;">
         <div class="label">From Date</div>
         <input type="date" name="from_date" value="<?php echo h((string)($_GET['from_date'] ?? date('Y-m-d'))); ?>">
@@ -270,7 +270,7 @@ render_header('Reports', 'reports');
       </form>
       <div id="dtSaveStatus" style="margin-top:6px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
 
-      <form method="get" action="export_deadtime.php" style="margin-top:8px;">
+      <form method="get" action="exports/export_deadtime.php" style="margin-top:8px;">
         <input type="hidden" name="dt_from" value="<?php echo h($dtFrom); ?>">
         <input type="hidden" name="dt_to" value="<?php echo h($dtTo); ?>">
         <input type="hidden" name="dt_start" value="<?php echo h($dtStart); ?>">

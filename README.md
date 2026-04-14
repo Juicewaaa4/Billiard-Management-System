@@ -47,10 +47,7 @@ Simple, beginner-friendly **Billiard Hall Management System** using **PHP**, **M
   - End game (auto time + billing)
   - Payment + change calculation
 - **Customers**: add/edit/delete (delete = admin only)
-- **Loyalty system**:
-  - Earn: **1 point per ₱50 spent**
-  - Redeem during payment: **1 point = ₱1 discount**
-  - Loyalty card view
+
 - **Transaction history**: filter by date/customer
 - **Reports**: daily/weekly income, most used tables, top loyal customers
 - **Receipt printing**: browser print dialog
