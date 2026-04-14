@@ -1,0 +1,17 @@
+# XAMPP / Local dev files
+output.html
+output.js
+dump.txt
+dump2.txt
+*.backup
+*.sql.backup
+test_db.php
+
+# PHP / IDE files
+.vscode/
+.idea/
+*.log
+vendor/
+node_modules/
+.DS_Store
+Thumbs.db
