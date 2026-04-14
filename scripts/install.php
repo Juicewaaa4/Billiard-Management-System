@@ -4,7 +4,7 @@ declare(strict_types=1);
 // One-time installer to create tables and seed default users.
 // After successful install, you can delete this file.
 
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/config/database.php';
 
 function run(string $sql): void
 {
