@@ -81,13 +81,35 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $filenameFrom = $from ? date('Y-m-d_Hi', strtotime($from)) : 'Start';
 $filenameTo = $to ? date('Y-m-d_Hi', strtotime($to)) : 'Present';
-$exportFilename = "Billiards_Transactions_{$filenameFrom}_to_{$filenameTo}.xls";
+
+$shift = trim((string)($_GET['shift'] ?? ''));
+$shiftLabels = ['morning' => 'Morning Shift', 'night' => 'Night Shift', 'both' => 'Full Day (Both Shifts)'];
+$shiftLabel = $shiftLabels[$shift] ?? '';
+$shiftSuffix = $shiftLabel !== '' ? '_' . str_replace(' ', '_', $shiftLabels[$shift]) : '';
+
+$exportFilename = "Billiards_Transactions_{$filenameFrom}_to_{$filenameTo}{$shiftSuffix}.xls";
 
 header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
 header('Content-Disposition: attachment; filename="' . $exportFilename . '"');
 
 echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
 echo '<head><meta charset="UTF-8"></head><body>';
+
+// Shift & time range info header
+if ($shiftLabel !== '' || $from || $to) {
+  echo '<table border="0" style="margin-bottom:8px;">';
+  if ($shiftLabel !== '') {
+    echo '<tr><td colspan="15" style="font-size:16px; font-weight:bold; color:#1e293b;">' . htmlspecialchars($shiftLabel) . '</td></tr>';
+  }
+  $fromDisplay = $from ? date('M j, Y g:i A', strtotime($from)) : '';
+  $toDisplay = $to ? date('M j, Y g:i A', strtotime($to)) : '';
+  if ($fromDisplay || $toDisplay) {
+    echo '<tr><td colspan="15" style="font-size:12px; color:#64748b;">Period: ' . htmlspecialchars($fromDisplay) . ' — ' . htmlspecialchars($toDisplay) . '</td></tr>';
+  }
+  echo '<tr><td colspan="15"></td></tr>';
+  echo '</table>';
+}
+
 echo '<table border="1">';
 
 // Header row with green background and bold text

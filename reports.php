@@ -22,7 +22,10 @@ try {
     ('tx_from_time', '08:00'),
     ('tx_to_time', '05:00'),
     ('dt_op_start', '08:00'),
-    ('dt_op_end', '00:00')
+    ('dt_op_end', '00:00'),
+    ('morning_shift_start', '08:00'),
+    ('evening_shift_start', '16:30'),
+    ('night_shift_end', '02:30')
   ");
 } catch (Throwable $ignore) {}
 
@@ -31,13 +34,19 @@ $savedTxFrom = '08:00';
 $savedTxTo = '05:00';
 $savedDtStart = '08:00';
 $savedDtEnd = '00:00';
+$savedMorning = '08:00';
+$savedEvening = '16:30';
+$savedNightEnd = '02:30';
 try {
-  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('tx_from_time','tx_to_time','dt_op_start','dt_op_end')");
+  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('tx_from_time','tx_to_time','dt_op_start','dt_op_end','morning_shift_start','evening_shift_start','night_shift_end')");
   foreach ($ssStmt->fetchAll() as $ss) {
     if ($ss['setting_key'] === 'tx_from_time') $savedTxFrom = $ss['setting_value'];
     if ($ss['setting_key'] === 'tx_to_time') $savedTxTo = $ss['setting_value'];
     if ($ss['setting_key'] === 'dt_op_start') $savedDtStart = $ss['setting_value'];
     if ($ss['setting_key'] === 'dt_op_end') $savedDtEnd = $ss['setting_value'];
+    if ($ss['setting_key'] === 'morning_shift_start') $savedMorning = $ss['setting_value'];
+    if ($ss['setting_key'] === 'evening_shift_start') $savedEvening = $ss['setting_value'];
+    if ($ss['setting_key'] === 'night_shift_end') $savedNightEnd = $ss['setting_value'];
   }
 } catch (Throwable $ignore) {}
 
@@ -50,6 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
       'tx_to_time'   => trim((string)($_POST['tx_to_time'] ?? '')),
       'dt_op_start'  => trim((string)($_POST['dt_op_start'] ?? '')),
       'dt_op_end'    => trim((string)($_POST['dt_op_end'] ?? '')),
+      'morning_shift_start' => trim((string)($_POST['morning_shift_start'] ?? '')),
+      'evening_shift_start' => trim((string)($_POST['evening_shift_start'] ?? '')),
+      'night_shift_end'     => trim((string)($_POST['night_shift_end'] ?? '')),
     ];
     foreach ($updates as $key => $val) {
       if ($val !== '' && preg_match('/^\d{2}:\d{2}$/', $val)) {
@@ -153,33 +165,57 @@ render_header('Reports', 'reports');
   <div class="card">
     <div class="row">
       <div>
-        <div class="card__title">Transaction Export (Excel/CSV)</div>
-        <div style="margin-top:6px;color:var(--muted);">Export completed transactions as CSV. Open in Excel.</div>
+        <div class="card__title">Transaction Export (Excel)</div>
+        <div style="margin-top:6px;color:var(--muted);">Export completed transactions per shift. Set the shift times below.</div>
       </div>
     </div>
 
-    <form method="get" action="exports/export_transactions.php" class="row" style="margin-top:12px; gap:10px;">
-      <div class="field" style="min-width:140px;">
-        <div class="label">From Date</div>
-        <input type="date" name="from_date" value="<?php echo h((string)($_GET['from_date'] ?? date('Y-m-d'))); ?>">
+    <!-- Date Selector -->
+    <div class="row" style="margin-top:14px; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+      <div class="field" style="min-width:150px;">
+        <div class="label">Date</div>
+        <input type="date" id="txExportDate" value="<?php echo h((string)($_GET['from_date'] ?? date('Y-m-d'))); ?>">
       </div>
-      <div class="field" style="min-width:120px;">
-        <div class="label">From Time</div>
-        <input type="time" name="from_time" id="txFromTime" value="<?php echo h((string)($_GET['from_time'] ?? $savedTxFrom)); ?>">
+    </div>
+
+    <!-- Shift Settings -->
+    <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+      <div style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:10px;">⏰ Shift Settings</div>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="min-width:140px;">
+          <div class="label">Morning Shift Start</div>
+          <input type="time" id="rptMorningStart" value="<?php echo h($savedMorning); ?>" style="font-size:13px;">
+        </div>
+        <div class="field" style="min-width:140px;">
+          <div class="label">Night Shift Start</div>
+          <input type="time" id="rptEveningStart" value="<?php echo h($savedEvening); ?>" style="font-size:13px;">
+        </div>
+        <div class="field" style="min-width:140px;">
+          <div class="label">Night Shift End</div>
+          <input type="time" id="rptNightEnd" value="<?php echo h($savedNightEnd); ?>" style="font-size:13px;">
+        </div>
       </div>
-      <div class="field" style="min-width:140px;">
-        <div class="label">To Date</div>
-        <input type="date" name="to_date" value="<?php echo h((string)($_GET['to_date'] ?? date('Y-m-d'))); ?>">
+      <div style="margin-top:8px; font-size:11px; color:var(--muted);">
+        ☀️ Morning: <strong id="rptMorningLabel"><?php echo date('g:i A', strtotime($savedMorning)); ?></strong> – <strong id="rptMorningEndLabel"><?php echo date('g:i A', strtotime($savedEvening)); ?></strong>
+        &nbsp;|&nbsp;
+        🌙 Night: <strong id="rptNightLabel"><?php echo date('g:i A', strtotime($savedEvening)); ?></strong> – <strong id="rptNightEndLabel"><?php echo date('g:i A', strtotime($savedNightEnd)); ?></strong> (next day)
+        &nbsp;— Times auto-save on change.
       </div>
-      <div class="field" style="min-width:120px;">
-        <div class="label">To Time</div>
-        <input type="time" name="to_time" id="txToTime" value="<?php echo h((string)($_GET['to_time'] ?? $savedTxTo)); ?>">
-      </div>
-      <div class="field" style="align-self:end;">
-        <button class="btn" type="submit">Export to Excel</button>
-      </div>
-    </form>
-    <div id="txSaveStatus" style="margin-top:6px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
+      <div id="shiftSaveStatus" style="margin-top:4px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
+    </div>
+
+    <!-- Shift Export Buttons -->
+    <div class="row" style="margin-top:14px; gap:10px; flex-wrap:wrap;">
+      <button class="btn" type="button" onclick="exportShiftTransactions('morning')" style="background:#38bdf8; color:white; border:none; font-size:13px; padding:10px 20px;">
+        ☀️ Export Morning Shift
+      </button>
+      <button class="btn" type="button" onclick="exportShiftTransactions('evening')" style="background:#6366f1; color:white; border:none; font-size:13px; padding:10px 20px;">
+        🌙 Export Night Shift
+      </button>
+      <button class="btn" type="button" onclick="exportShiftTransactions('both')" style="background:#22c55e; color:white; border:none; font-size:13px; padding:10px 20px;">
+        📊 Export Both (Full Day)
+      </button>
+    </div>
   </div>
 </div>
 
@@ -348,20 +384,87 @@ render_header('Reports', 'reports');
 </div>
 
 <script>
-// Auto-save time settings to database
+// Format time string (HH:MM) to 12-hour AM/PM
+function fmt12(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hr = h % 12 || 12;
+  return hr + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+// Update shift labels when time inputs change
+function updateShiftLabels() {
+  const mStart = document.getElementById('rptMorningStart');
+  const eStart = document.getElementById('rptEveningStart');
+  const nEnd   = document.getElementById('rptNightEnd');
+  if (mStart) document.getElementById('rptMorningLabel').textContent = fmt12(mStart.value);
+  if (eStart) {
+    document.getElementById('rptMorningEndLabel').textContent = fmt12(eStart.value);
+    document.getElementById('rptNightLabel').textContent = fmt12(eStart.value);
+  }
+  if (nEnd) document.getElementById('rptNightEndLabel').textContent = fmt12(nEnd.value);
+}
+
+// Export transactions for a specific shift
+function exportShiftTransactions(shift) {
+  const dateVal = document.getElementById('txExportDate').value;
+  const morningStart = document.getElementById('rptMorningStart').value;
+  const eveningStart = document.getElementById('rptEveningStart').value;
+  const nightEnd     = document.getElementById('rptNightEnd').value;
+
+  let fromDate, fromTime, toDate, toTime, shiftLabel;
+
+  if (shift === 'morning') {
+    fromDate = dateVal;
+    fromTime = morningStart;
+    toDate   = dateVal;
+    toTime   = eveningStart;
+    shiftLabel = 'morning';
+  } else if (shift === 'evening') {
+    fromDate = dateVal;
+    fromTime = eveningStart;
+    toDate   = dateVal;  // overnight auto-adjusted by export script
+    toTime   = nightEnd;
+    shiftLabel = 'night';
+  } else {
+    // both — full day from morning start to night end
+    fromDate = dateVal;
+    fromTime = morningStart;
+    toDate   = dateVal;  // overnight auto-adjusted by export script
+    toTime   = nightEnd;
+    shiftLabel = 'both';
+  }
+
+  const url = 'exports/export_transactions.php'
+    + '?from_date=' + encodeURIComponent(fromDate)
+    + '&from_time=' + encodeURIComponent(fromTime)
+    + '&to_date='   + encodeURIComponent(toDate)
+    + '&to_time='   + encodeURIComponent(toTime)
+    + '&shift='     + encodeURIComponent(shiftLabel);
+
+  window.open(url, '_blank');
+}
+
+// Auto-save ALL settings to database
 function saveReportSettings(statusElId) {
-  const txFrom = document.getElementById('txFromTime');
-  const txTo   = document.getElementById('txToTime');
-  const dtStart = document.getElementById('dtOpStart');
-  const dtEnd   = document.getElementById('dtOpEnd');
   const statusEl = document.getElementById(statusElId);
 
   const body = new URLSearchParams();
   body.set('action', 'save_report_settings');
-  if (txFrom) body.set('tx_from_time', txFrom.value);
-  if (txTo)   body.set('tx_to_time', txTo.value);
+
+  // Dead Time settings
+  const dtStart = document.getElementById('dtOpStart');
+  const dtEnd   = document.getElementById('dtOpEnd');
   if (dtStart) body.set('dt_op_start', dtStart.value);
   if (dtEnd)   body.set('dt_op_end', dtEnd.value);
+
+  // Shift settings
+  const mStart = document.getElementById('rptMorningStart');
+  const eStart = document.getElementById('rptEveningStart');
+  const nEnd   = document.getElementById('rptNightEnd');
+  if (mStart) body.set('morning_shift_start', mStart.value);
+  if (eStart) body.set('evening_shift_start', eStart.value);
+  if (nEnd)   body.set('night_shift_end', nEnd.value);
 
   fetch('reports.php', {
     method: 'POST',
@@ -371,7 +474,7 @@ function saveReportSettings(statusElId) {
   .then(r => r.json())
   .then(data => {
     if (statusEl) {
-      statusEl.textContent = data.ok ? '✓ Time saved' : '✗ Error saving';
+      statusEl.textContent = data.ok ? '✓ Saved' : '✗ Error saving';
       statusEl.style.color = data.ok ? '#22c55e' : '#ef4444';
       statusEl.style.display = 'block';
       setTimeout(() => { statusEl.style.display = 'none'; }, 2500);
@@ -387,10 +490,10 @@ function saveReportSettings(statusElId) {
   });
 }
 
-// Attach auto-save to Transaction Export time pickers
-['txFromTime', 'txToTime'].forEach(id => {
+// Attach auto-save + label update to Shift Settings
+['rptMorningStart', 'rptEveningStart', 'rptNightEnd'].forEach(id => {
   const el = document.getElementById(id);
-  if (el) el.addEventListener('change', () => saveReportSettings('txSaveStatus'));
+  if (el) el.addEventListener('change', () => { updateShiftLabels(); saveReportSettings('shiftSaveStatus'); });
 });
 
 // Attach auto-save to Dead Time time pickers
