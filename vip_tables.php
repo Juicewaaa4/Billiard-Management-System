@@ -1252,55 +1252,44 @@ function submitExtend() {
   document.getElementById('extendForm').submit();
 }
 
-// ── Void Game via SweetAlert + API ──
+// ── Void Game via Prompt + API ──
 function voidGame(sessionId, tableName) {
-  Swal.fire({
-    title: 'Void Session: ' + tableName,
-    text: "Please enter the reason for voiding (e.g. Wrong Table):",
-    input: 'text',
-    inputPlaceholder: 'Reason...',
-    icon: 'warning',
-    showCancelButton: true,
-    confirmButtonColor: '#ef4444',
-    cancelButtonColor: '#6b7280',
-    confirmButtonText: 'Void Game',
-    inputValidator: (value) => {
-      if (!value) {
-        return 'You need to write a reason!'
-      }
-    }
-  }).then((result) => {
-    if (result.isConfirmed) {
-      const reason = result.value;
-      const formData = new URLSearchParams();
-      formData.append('session_id', sessionId);
-      formData.append('void_reason', reason);
+  const reason = window.prompt("Void Session: " + tableName + "\n\nPlease enter the reason for voiding (e.g. Wrong Table):");
+  
+  if (reason === null) {
+    // User cancelled
+    return;
+  }
+  
+  if (reason.trim() === '') {
+    alert("You need to write a reason to void the session!");
+    return;
+  }
 
-      fetch('api/api_void_game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.ok) {
-          Swal.fire(
-            'Voided!',
-            'The session has been voided.',
-            'success'
-          ).then(() => {
-            window.location.reload();
-          });
-        } else {
-          Swal.fire('Error', data.error || 'Failed to void session', 'error');
-        }
-      })
-      .catch(err => {
-        console.error(err);
-        Swal.fire('Error', 'Network error occurred', 'error');
-      });
-    }
-  });
+  if (confirm("Are you sure you want to void this session? It will be cleared from the table.")) {
+    const formData = new URLSearchParams();
+    formData.append('session_id', sessionId);
+    formData.append('void_reason', reason.trim());
+
+    fetch('api/api_void_game.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        alert("The session has been voided.");
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'Failed to void session'));
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Network error occurred.');
+    });
+  }
 }
 
 // ── End Game Modal ──
