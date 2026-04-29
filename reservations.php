@@ -23,17 +23,19 @@ try {
     ) ENGINE=InnoDB;
   ");
   // Seed defaults if not present
-  db()->exec("INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES ('morning_shift_start', '08:00'), ('evening_shift_start', '16:30')");
+  db()->exec("INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES ('morning_shift_start', '08:00'), ('evening_shift_start', '16:30'), ('night_shift_end', '02:30')");
 } catch (Throwable $ignore) {}
 
 // Load saved shift settings
 $savedMorning = '08:00';
 $savedEvening = '16:30';
+$savedNightEnd = '02:30';
 try {
-  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','evening_shift_start')");
+  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','evening_shift_start','night_shift_end')");
   foreach ($ssStmt->fetchAll() as $ss) {
     if ($ss['setting_key'] === 'morning_shift_start') $savedMorning = $ss['setting_value'];
     if ($ss['setting_key'] === 'evening_shift_start') $savedEvening = $ss['setting_value'];
+    if ($ss['setting_key'] === 'night_shift_end') $savedNightEnd = $ss['setting_value'];
   }
 } catch (Throwable $ignore) {}
 
@@ -44,11 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     require_role(['admin']);
     $mStart = trim((string)($_POST['morning_start'] ?? ''));
     $eStart = trim((string)($_POST['evening_start'] ?? ''));
+    $nEnd   = trim((string)($_POST['night_end'] ?? ''));
     if (preg_match('/^\d{2}:\d{2}$/', $mStart)) {
-      db()->prepare("UPDATE app_settings SET setting_value = ? WHERE setting_key = 'morning_shift_start'")->execute([$mStart]);
+      db()->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES ('morning_shift_start', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([$mStart]);
     }
     if (preg_match('/^\d{2}:\d{2}$/', $eStart)) {
-      db()->prepare("UPDATE app_settings SET setting_value = ? WHERE setting_key = 'evening_shift_start'")->execute([$eStart]);
+      db()->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES ('evening_shift_start', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([$eStart]);
+    }
+    if (preg_match('/^\d{2}:\d{2}$/', $nEnd)) {
+      db()->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES ('night_shift_end', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([$nEnd]);
     }
     echo json_encode(['ok' => true]);
   } catch (Throwable $e) {
@@ -213,8 +219,12 @@ render_header('Reservations', 'reservations');
         <input type="time" id="morningStart" value="<?php echo h($savedMorning); ?>" style="font-size:13px;">
       </div>
       <div class="field" style="min-width:140px;">
-        <div class="label">Evening Shift Start</div>
+        <div class="label">Night Shift Start</div>
         <input type="time" id="eveningStart" value="<?php echo h($savedEvening); ?>" style="font-size:13px;">
+      </div>
+      <div class="field" style="min-width:140px;">
+        <div class="label">Night Shift End</div>
+        <input type="time" id="nightEnd" value="<?php echo h($savedNightEnd); ?>" style="font-size:13px;">
       </div>
       <div class="field" style="align-self:end;">
         <button class="btn" type="button" onclick="exportReservation('morning')" style="background:#38bdf8; color:white; border:none; font-size:12px;">
@@ -233,7 +243,10 @@ render_header('Reservations', 'reservations');
       </div>
     </div>
     <div style="margin-top:6px; font-size:11px; color:var(--muted);">
-      Morning: <strong id="morningLabel"><?php echo date('g:i A', strtotime($savedMorning)); ?></strong> &nbsp;|&nbsp; Evening: <strong id="eveningLabel"><?php echo date('g:i A', strtotime($savedEvening)); ?></strong> — Change the times above and they auto-save.
+      ☀️ Morning: <strong id="morningLabel"><?php echo date('g:i A', strtotime($savedMorning)); ?></strong> – <strong id="morningEndLabel"><?php echo date('g:i A', strtotime($savedEvening)); ?></strong>
+      &nbsp;|&nbsp;
+      🌙 Night: <strong id="eveningLabel"><?php echo date('g:i A', strtotime($savedEvening)); ?></strong> – <strong id="nightEndLabel"><?php echo date('g:i A', strtotime($savedNightEnd)); ?></strong> (next day)
+      &nbsp;— Times auto-save on change.
     </div>
     <div id="shiftSaveStatus" style="margin-top:4px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
   </div>
@@ -488,24 +501,33 @@ function formatTime12(timeStr) {
 function updateShiftLabels() {
   const mEl = document.getElementById('morningStart');
   const eEl = document.getElementById('eveningStart');
+  const nEl = document.getElementById('nightEnd');
   const mLabel = document.getElementById('morningLabel');
+  const mEndLabel = document.getElementById('morningEndLabel');
   const eLabel = document.getElementById('eveningLabel');
+  const nLabel = document.getElementById('nightEndLabel');
   if (mEl && mLabel) mLabel.textContent = formatTime12(mEl.value);
+  if (eEl && mEndLabel) mEndLabel.textContent = formatTime12(eEl.value);
   if (eEl && eLabel) eLabel.textContent = formatTime12(eEl.value);
+  if (nEl && nLabel) nLabel.textContent = formatTime12(nEl.value);
 }
 
 // Auto-save shift settings to database
 function saveShiftSettings() {
   const mEl = document.getElementById('morningStart');
   const eEl = document.getElementById('eveningStart');
+  const nEl = document.getElementById('nightEnd');
   if (!mEl || !eEl) return;
 
   const statusEl = document.getElementById('shiftSaveStatus');
   
+  let body = 'action=save_shift_settings&morning_start=' + encodeURIComponent(mEl.value) + '&evening_start=' + encodeURIComponent(eEl.value);
+  if (nEl) body += '&night_end=' + encodeURIComponent(nEl.value);
+
   fetch('reservations.php', {
     method: 'POST',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: 'action=save_shift_settings&morning_start=' + encodeURIComponent(mEl.value) + '&evening_start=' + encodeURIComponent(eEl.value)
+    body: body
   })
   .then(r => r.json())
   .then(data => {
@@ -527,10 +549,10 @@ function saveShiftSettings() {
 }
 
 // Attach listeners — update labels AND auto-save
-const mInput = document.getElementById('morningStart');
-const eInput = document.getElementById('eveningStart');
-if (mInput) mInput.addEventListener('change', () => { updateShiftLabels(); saveShiftSettings(); });
-if (eInput) eInput.addEventListener('change', () => { updateShiftLabels(); saveShiftSettings(); });
+['morningStart', 'eveningStart', 'nightEnd'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { updateShiftLabels(); saveShiftSettings(); });
+});
 
 // Export reservation with shift filter
 function exportReservation(shift) {
@@ -538,6 +560,7 @@ function exportReservation(shift) {
   const filterStatus = <?php echo json_encode($filterStatus); ?>;
   const morningStart = document.getElementById('morningStart') ? document.getElementById('morningStart').value : '08:00';
   const eveningStart = document.getElementById('eveningStart') ? document.getElementById('eveningStart').value : '16:30';
+  const nightEnd     = document.getElementById('nightEnd') ? document.getElementById('nightEnd').value : '02:30';
   
   const url = 'exports/export_reservations.php'
     + '?from=' + encodeURIComponent(filterDate)
@@ -545,7 +568,8 @@ function exportReservation(shift) {
     + '&status=' + encodeURIComponent(filterStatus)
     + '&shift=' + encodeURIComponent(shift)
     + '&morning_start=' + encodeURIComponent(morningStart)
-    + '&evening_start=' + encodeURIComponent(eveningStart);
+    + '&evening_start=' + encodeURIComponent(eveningStart)
+    + '&night_end=' + encodeURIComponent(nightEnd);
   
   window.open(url, '_blank');
 }

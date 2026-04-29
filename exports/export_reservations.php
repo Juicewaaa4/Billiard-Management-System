@@ -16,19 +16,22 @@ $shiftFilter = (string)($_GET['shift'] ?? 'both'); // 'morning', 'evening', 'bot
 // Configurable shift start times — from URL or saved in database
 $morningStart = (string)($_GET['morning_start'] ?? '');
 $eveningStart = (string)($_GET['evening_start'] ?? '');
+$nightEnd = (string)($_GET['night_end'] ?? '');
 
 // Fallback: load from database if not in URL
-if ($morningStart === '' || $eveningStart === '') {
+if ($morningStart === '' || $eveningStart === '' || $nightEnd === '') {
   try {
-    $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','evening_shift_start')");
+    $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','evening_shift_start', 'night_shift_end')");
     foreach ($ssStmt->fetchAll() as $ss) {
       if ($ss['setting_key'] === 'morning_shift_start' && $morningStart === '') $morningStart = $ss['setting_value'];
       if ($ss['setting_key'] === 'evening_shift_start' && $eveningStart === '') $eveningStart = $ss['setting_value'];
+      if ($ss['setting_key'] === 'night_shift_end' && $nightEnd === '') $nightEnd = $ss['setting_value'];
     }
   } catch (Throwable $ignore) {}
 }
 if ($morningStart === '') $morningStart = '08:00';
 if ($eveningStart === '') $eveningStart = '16:30';
+if ($nightEnd === '') $nightEnd = '02:30';
 
 // Convert shift start times to hour+minute for comparison
 $morningStartParts = explode(':', $morningStart);
@@ -74,6 +77,7 @@ header("Expires: 0");
 // Format shift time for display
 $morningStartDisplay = date('g:i A', strtotime($morningStart));
 $eveningStartDisplay = date('g:i A', strtotime($eveningStart));
+$nightEndDisplay = date('g:i A', strtotime($nightEnd));
 
 // Determine which shift a reservation belongs to based on its start_time
 function getShiftLabel(string $startTime, int $morningStartMin, int $eveningStartMin): string {
@@ -232,7 +236,7 @@ if ($shiftFilter === 'morning') {
 foreach ($shiftsToRender as $shift) {
     $shiftTimeLabel = $shift === 'MORNING' 
         ? "MORNING SHIFT ({$morningStartDisplay} - {$eveningStartDisplay})" 
-        : "EVENING SHIFT ({$eveningStartDisplay} - {$morningStartDisplay})";
+        : "EVENING SHIFT ({$eveningStartDisplay} - {$nightEndDisplay} Next Day)";
     
     // 1st Row: RESERVATION + Shift info
     echo '<tr>';

@@ -540,6 +540,7 @@ render_header('VIP Table With Karaoke', 'vip_tables');
 
           <div style="display:flex; gap:8px;">
             <button class="btn btn--primary" type="button" style="flex:1;" onclick="openExtendModal(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float)$active['rate_per_hour']; ?>, '<?php echo h($active['scheduled_end_time'] ?? ''); ?>', <?php echo $maxExtH; ?>)">Extend</button>
+            <button class="btn btn--danger" type="button" style="flex:1; background: #ef4444; border-color: #ef4444;" onclick="voidGame(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>')">Void</button>
             <button class="btn btn--ghost" type="button" style="flex:1;" onclick="openEndModal(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>')">End Game</button>
           </div>
         <?php else: ?>
@@ -1249,6 +1250,57 @@ function submitExtend() {
   document.getElementById('ef_hours').value = extendHours;
   document.getElementById('ef_payment').value = pay;
   document.getElementById('extendForm').submit();
+}
+
+// ── Void Game via SweetAlert + API ──
+function voidGame(sessionId, tableName) {
+  Swal.fire({
+    title: 'Void Session: ' + tableName,
+    text: "Please enter the reason for voiding (e.g. Wrong Table):",
+    input: 'text',
+    inputPlaceholder: 'Reason...',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Void Game',
+    inputValidator: (value) => {
+      if (!value) {
+        return 'You need to write a reason!'
+      }
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const reason = result.value;
+      const formData = new URLSearchParams();
+      formData.append('session_id', sessionId);
+      formData.append('void_reason', reason);
+
+      fetch('api/api_void_game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString()
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.ok) {
+          Swal.fire(
+            'Voided!',
+            'The session has been voided.',
+            'success'
+          ).then(() => {
+            window.location.reload();
+          });
+        } else {
+          Swal.fire('Error', data.error || 'Failed to void session', 'error');
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        Swal.fire('Error', 'Network error occurred', 'error');
+      });
+    }
+  });
 }
 
 // ── End Game Modal ──

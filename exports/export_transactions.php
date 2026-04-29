@@ -29,7 +29,7 @@ $to = $toDateStr ? date('Y-m-d H:i:s', strtotime("{$toDateStr} {$toTimeStr}")) :
 
 $customerId = (int) ($_GET['customer_id'] ?? 0);
 
-$where = ["gs.end_time IS NOT NULL"];
+$where = ["gs.end_time IS NOT NULL", "gs.is_voided = 0"];
 $params = [];
 
 if ($from) {
@@ -215,5 +215,72 @@ echo '<td colspan="2"></td>';
 echo '</tr>';
 
 echo '</table>';
+
+
+// ==========================================
+// VOIDED SESSIONS TABLE
+// ==========================================
+$voidWhere = ["gs.end_time IS NOT NULL", "gs.is_voided = 1"];
+$voidParams = [];
+if ($from) { $voidWhere[] = "gs.end_time >= ?"; $voidParams[] = $from; }
+if ($to) { $voidWhere[] = "gs.end_time <= ?"; $voidParams[] = $to; }
+if ($customerId > 0) { $voidWhere[] = "gs.customer_id = ?"; $voidParams[] = $customerId; }
+
+$voidStmt = db()->prepare("
+  SELECT 
+    gs.id AS session_id,
+    t.table_number,
+    gs.start_time,
+    gs.end_time,
+    gs.void_reason,
+    COALESCE(c.name, NULLIF(gs.walk_in_name, ''), 'Walk-in') AS player_name,
+    u.username AS cashier
+  FROM game_sessions gs
+  JOIN tables t ON t.id = gs.table_id
+  LEFT JOIN customers c ON c.id = gs.customer_id
+  LEFT JOIN users u ON u.id = gs.created_by
+  WHERE " . implode(' AND ', $voidWhere) . "
+  ORDER BY gs.end_time DESC
+");
+$voidStmt->execute($voidParams);
+$voidRows = $voidStmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (!empty($voidRows)) {
+  echo '<br><br>';
+  echo '<table border="1" style="font-family: Calibri, sans-serif; margin-top:20px;">';
+  echo '<tr>';
+  echo '<th colspan="7" style="background-color: #ef4444; color: white; font-weight: bold; font-size: 14px; padding: 5px;">VOIDED SESSIONS</th>';
+  echo '</tr>';
+  echo '<tr>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Session ID</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Date Voided</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Table</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Player</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Reason for Void</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Cashier</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Running Time Before Void</th>';
+  echo '</tr>';
+
+  foreach ($voidRows as $vr) {
+    $vEndTs = strtotime($vr['end_time']);
+    $vStartTs = strtotime($vr['start_time']);
+    $vDurSecs = max(0, $vEndTs - $vStartTs);
+    $vh = floor($vDurSecs / 3600);
+    $vm = floor(($vDurSecs % 3600) / 60);
+    $vDurFmt = sprintf("%02dh %02dm", $vh, $vm);
+    
+    echo '<tr>';
+    echo '<td style="text-align: center;">' . htmlspecialchars((string) $vr['session_id']) . '</td>';
+    echo '<td style="text-align: center;">' . htmlspecialchars(date('m/d/Y g:i A', $vEndTs)) . '</td>';
+    echo '<td style="text-align: center;">' . htmlspecialchars((string) $vr['table_number']) . '</td>';
+    echo '<td style="text-align: center;">' . htmlspecialchars((string) $vr['player_name']) . '</td>';
+    echo '<td style="color: #ef4444; font-weight: bold;">' . htmlspecialchars((string) $vr['void_reason']) . '</td>';
+    echo '<td style="text-align: center;">' . htmlspecialchars((string) $vr['cashier']) . '</td>';
+    echo '<td style="text-align: center;">' . htmlspecialchars($vDurFmt) . '</td>';
+    echo '</tr>';
+  }
+  echo '</table>';
+}
+
 echo '</body></html>';
 exit;

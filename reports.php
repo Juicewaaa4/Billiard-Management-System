@@ -157,6 +157,17 @@ $dtStmt = db()->prepare("
 $dtStmt->execute([$dtFrom, $dtTo]);
 $dtRows = $dtStmt->fetchAll();
 
+// ── Fetch Voided Sessions ──
+$voidStmt = db()->query("
+  SELECT gs.*, t.table_number, u.username as cashier_name
+  FROM game_sessions gs
+  JOIN tables t ON t.id = gs.table_id
+  LEFT JOIN users u ON u.id = gs.created_by
+  WHERE gs.is_voided = 1
+  ORDER BY gs.end_time DESC
+  LIMIT 20
+");
+$voidRows = $voidStmt->fetchAll();
 
 render_header('Reports', 'reports');
 ?>
@@ -381,6 +392,43 @@ render_header('Reports', 'reports');
     </div>
 
   </div>
+
+  <!-- Voided Sessions Section -->
+  <div class="card" style="margin-top:14px; border-left:4px solid #ef4444;">
+    <div class="row">
+      <div>
+        <div class="card__title" style="color:#ef4444;">Voided Sessions (Recent)</div>
+        <div style="margin-top:6px;color:var(--muted);">Sessions that were cancelled or placed on the wrong table.</div>
+      </div>
+    </div>
+    <div style="overflow:auto; margin-top:12px; max-height:250px;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Date & Time</th>
+            <th>Table</th>
+            <th>Cashier</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (empty($voidRows)): ?>
+            <tr><td colspan="4" style="text-align:center; color:var(--muted);">No voided sessions recently.</td></tr>
+          <?php else: ?>
+            <?php foreach ($voidRows as $v): ?>
+              <tr>
+                <td><?php echo date('M j, Y g:i A', strtotime($v['end_time'])); ?></td>
+                <td><strong><?php echo h($v['table_number']); ?></strong></td>
+                <td><?php echo h($v['cashier_name'] ?? 'Unknown'); ?></td>
+                <td style="color:#ef4444; font-weight:500;"><?php echo h($v['void_reason'] ?: 'No Reason'); ?></td>
+              </tr>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <script>
