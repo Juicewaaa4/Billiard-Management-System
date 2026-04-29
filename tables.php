@@ -819,6 +819,33 @@ render_header('Tables', 'tables');
   </div>
 </div>
 
+<!-- Void Game Modal -->
+<div id="voidModal" class="game-modal" style="display:none;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>⚠️ Void Session — <span id="voidTableName"></span></h3>
+      <span class="game-modal__close" onclick="closeVoidModal()">&times;</span>
+    </div>
+    <div class="game-modal__body" style="padding:28px 24px;">
+      <div style="text-align:center; margin-bottom:16px;">
+        <div style="width:56px; height:56px; margin:0 auto 16px; border-radius:50%; background:rgba(239,68,68,0.12); display:flex; align-items:center; justify-content:center; font-size:28px;">
+          ❌</div>
+        <p style="color:var(--text); font-size:15px; margin:0 0 8px;">Are you sure you want to <strong>void this game</strong>?</p>
+        <p style="color:var(--muted); font-size:13px; margin:0;">This will clear the table without recording a sale.</p>
+      </div>
+      <div class="field" style="margin-top:20px;">
+        <label class="label">Reason for Voiding</label>
+        <input type="text" id="voidReasonInput" class="input" placeholder="e.g. Wrong Table" autocomplete="off">
+        <input type="hidden" id="voidSessionId">
+      </div>
+      <div class="game-modal__footer" style="justify-content:center; margin-top:24px;">
+        <button type="button" class="btn btn--ghost" onclick="closeVoidModal()">Cancel</button>
+        <button type="button" class="btn btn--danger" onclick="submitVoid()">Confirm Void</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
   .game-modal {
     position: fixed;
@@ -1223,53 +1250,60 @@ render_header('Tables', 'tables');
     document.getElementById('endForm').submit();
   }
 
-  // ── Void Game via Prompt + API ──
+  // ── Void Game via Modal + API ──
   function voidGame(sessionId, tableName) {
-    const reason = window.prompt("Void Session: " + tableName + "\n\nPlease enter the reason for voiding (e.g. Wrong Table):");
+    document.getElementById('voidSessionId').value = sessionId;
+    document.getElementById('voidTableName').textContent = tableName;
+    document.getElementById('voidReasonInput').value = '';
+    document.getElementById('voidModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('voidReasonInput').focus(), 100);
+  }
+
+  function closeVoidModal() {
+    document.getElementById('voidModal').style.display = 'none';
+  }
+
+  function submitVoid() {
+    const sessionId = document.getElementById('voidSessionId').value;
+    const reason = document.getElementById('voidReasonInput').value.trim();
     
-    if (reason === null) {
-      // User cancelled
-      return;
-    }
-    
-    if (reason.trim() === '') {
+    if (reason === '') {
       alert("You need to write a reason to void the session!");
+      document.getElementById('voidReasonInput').focus();
       return;
     }
 
-    if (confirm("Are you sure you want to void this session? It will be cleared from the table.")) {
-      const formData = new URLSearchParams();
-      formData.append('session_id', sessionId);
-      formData.append('void_reason', reason.trim());
+    const formData = new URLSearchParams();
+    formData.append('session_id', sessionId);
+    formData.append('void_reason', reason);
 
-      fetch('api/api_void_game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.ok) {
-          alert("The session has been voided.");
-          window.location.reload();
-        } else {
-          alert('Error: ' + (data.error || 'Failed to void session'));
-        }
-      })
-      .catch(err => {
-        console.error(err);
-        alert('Network error occurred.');
-      });
-    }
+    fetch('api/api_void_game.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'Failed to void session'));
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Network error occurred.');
+    });
   }
 
   // Close modals on backdrop click
-  ['startModal', 'extendModal', 'endModal'].forEach(id => {
+  ['startModal', 'extendModal', 'endModal', 'voidModal'].forEach(id => {
     document.getElementById(id).addEventListener('click', e => {
       if (e.target.id === id) {
         if (id === 'startModal') closeStartModal();
         else if (id === 'extendModal') closeExtendModal();
-        else closeEndModal();
+        else if (id === 'endModal') closeEndModal();
+        else closeVoidModal();
       }
     });
   });
