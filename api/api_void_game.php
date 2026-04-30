@@ -46,13 +46,12 @@ try {
 
   db()->beginTransaction();
   
-  // Set end_time to NOW, mark voided, store reason, and clear total amount
+  // Set end_time to NOW, mark voided, store reason (keep total_amount for audit)
   db()->prepare("
     UPDATE game_sessions 
     SET end_time = NOW(), 
         is_voided = 1, 
-        void_reason = ?, 
-        total_amount = 0 
+        void_reason = ?
     WHERE id = ?
   ")->execute([$voidReason, $sessionId]);
   

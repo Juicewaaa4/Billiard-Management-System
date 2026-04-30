@@ -233,6 +233,7 @@ $voidStmt = db()->prepare("
     gs.start_time,
     gs.end_time,
     gs.void_reason,
+    gs.total_amount,
     COALESCE(c.name, NULLIF(gs.walk_in_name, ''), 'Walk-in') AS player_name,
     u.username AS cashier
   FROM game_sessions gs
@@ -249,7 +250,7 @@ if (!empty($voidRows)) {
   echo '<br><br>';
   echo '<table border="1" style="font-family: Calibri, sans-serif; margin-top:20px;">';
   echo '<tr>';
-  echo '<th colspan="7" style="background-color: #ef4444; color: white; font-weight: bold; font-size: 14px; padding: 5px;">VOIDED SESSIONS</th>';
+  echo '<th colspan="8" style="background-color: #ef4444; color: white; font-weight: bold; font-size: 14px; padding: 5px;">VOIDED SESSIONS</th>';
   echo '</tr>';
   echo '<tr>';
   echo '<th style="background-color: #fca5a5; font-weight: bold;">Session ID</th>';
@@ -259,6 +260,7 @@ if (!empty($voidRows)) {
   echo '<th style="background-color: #fca5a5; font-weight: bold;">Reason for Void</th>';
   echo '<th style="background-color: #fca5a5; font-weight: bold;">Cashier</th>';
   echo '<th style="background-color: #fca5a5; font-weight: bold;">Running Time Before Void</th>';
+  echo '<th style="background-color: #fca5a5; font-weight: bold;">Amount Voided</th>';
   echo '</tr>';
 
   foreach ($voidRows as $vr) {
@@ -277,6 +279,7 @@ if (!empty($voidRows)) {
     echo '<td style="color: #ef4444; font-weight: bold;">' . htmlspecialchars((string) $vr['void_reason']) . '</td>';
     echo '<td style="text-align: center;">' . htmlspecialchars((string) $vr['cashier']) . '</td>';
     echo '<td style="text-align: center;">' . htmlspecialchars($vDurFmt) . '</td>';
+    echo '<td style="text-align: right; color: #ef4444; font-weight: bold;">₱' . number_format((float) $vr['total_amount'], 2) . '</td>';
     echo '</tr>';
   }
   echo '</table>';

@@ -1268,7 +1268,7 @@ render_header('Tables', 'tables');
     const reason = document.getElementById('voidReasonInput').value.trim();
     
     if (reason === '') {
-      alert("You need to write a reason to void the session!");
+      showWarnModal('⚠️ Reason Required', 'You need to write a reason to void the session!');
       document.getElementById('voidReasonInput').focus();
       return;
     }

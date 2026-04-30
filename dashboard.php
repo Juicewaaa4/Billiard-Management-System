@@ -24,7 +24,7 @@ $stmt = db()->prepare("
   SELECT COALESCE(SUM(gs.total_amount),0) AS total
   FROM transactions tx
   JOIN game_sessions gs ON gs.id = tx.session_id
-  WHERE gs.end_time IS NOT NULL
+  WHERE gs.end_time IS NOT NULL AND gs.is_voided = 0
     AND DATE(gs.end_time) = ?
 ");
 $stmt->execute([$selectedDate]);
@@ -51,7 +51,7 @@ $gamesStmt = db()->prepare("
     COUNT(CASE WHEN t.type='ktv' THEN gs.id END) AS total_ktv_games
   FROM game_sessions gs
   JOIN tables t ON t.id = gs.table_id
-  WHERE gs.end_time IS NOT NULL
+  WHERE gs.end_time IS NOT NULL AND gs.is_voided = 0
     AND DATE(gs.end_time) = ?
 ");
 $gamesStmt->execute([$selectedDate]);
@@ -83,7 +83,7 @@ $chartStmt = db()->prepare("
     SELECT DATE(gs.end_time) AS d, t.type, COALESCE(SUM(gs.total_amount),0) AS income
     FROM game_sessions gs
     JOIN tables t ON gs.table_id = t.id
-    WHERE gs.end_time IS NOT NULL AND DATE(gs.end_time) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
+    WHERE gs.end_time IS NOT NULL AND gs.is_voided = 0 AND DATE(gs.end_time) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
     GROUP BY DATE(gs.end_time), t.type
     UNION ALL
     SELECT rental_date AS d, 'kubo' AS type, COALESCE(SUM(payment_amount),0) AS income

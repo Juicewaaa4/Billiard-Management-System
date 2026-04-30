@@ -16,7 +16,7 @@ $from = parse_date((string)($_GET['from'] ?? date('Y-m-d')));
 $to = parse_date((string)($_GET['to'] ?? date('Y-m-d')));
 $customerId = (int)($_GET['customer_id'] ?? 0);
 
-$where = ["gs.end_time IS NOT NULL"];
+$where = ["gs.end_time IS NOT NULL", "gs.is_voided = 0"];
 $params = [];
 
 if ($from) { $where[] = "DATE(gs.end_time) >= ?"; $params[] = $from; }

@@ -84,7 +84,7 @@ if ($range === 'daily') {
     SELECT d, SUM(total) AS total FROM (
       SELECT DATE(end_time) AS d, COALESCE(SUM(total_amount),0) AS total
       FROM game_sessions
-      WHERE end_time IS NOT NULL AND end_time >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+      WHERE end_time IS NOT NULL AND is_voided = 0 AND end_time >= DATE_SUB(NOW(), INTERVAL 14 DAY)
       GROUP BY DATE(end_time)
       UNION ALL
       SELECT rental_date AS d, COALESCE(SUM(payment_amount),0) AS total
@@ -100,7 +100,7 @@ if ($range === 'daily') {
     SELECT yw, MIN(week_start) AS week_start, SUM(total) AS total FROM (
       SELECT YEARWEEK(end_time, 1) AS yw, MIN(DATE(end_time)) AS week_start, COALESCE(SUM(total_amount),0) AS total
       FROM game_sessions
-      WHERE end_time IS NOT NULL AND end_time >= DATE_SUB(NOW(), INTERVAL 12 WEEK)
+      WHERE end_time IS NOT NULL AND is_voided = 0 AND end_time >= DATE_SUB(NOW(), INTERVAL 12 WEEK)
       GROUP BY YEARWEEK(end_time, 1)
       UNION ALL
       SELECT YEARWEEK(rental_date, 1) AS yw, MIN(rental_date) AS week_start, COALESCE(SUM(payment_amount),0) AS total
@@ -117,7 +117,7 @@ $mostUsed = db()->query("
   SELECT t.table_number, COUNT(*) AS sessions_count
   FROM game_sessions gs
   JOIN tables t ON t.id = gs.table_id
-  WHERE gs.end_time IS NOT NULL
+  WHERE gs.end_time IS NOT NULL AND gs.is_voided = 0
     AND gs.end_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
   GROUP BY gs.table_id
   ORDER BY sessions_count DESC
@@ -149,7 +149,7 @@ $dtStmt = db()->prepare("
     SELECT t.id, t.table_number, t.type,
            COALESCE(SUM(gs.duration_seconds), 0) AS played_seconds
     FROM tables t
-    LEFT JOIN game_sessions gs ON gs.table_id = t.id AND DATE(gs.start_time) >= ? AND DATE(gs.start_time) <= ?
+    LEFT JOIN game_sessions gs ON gs.table_id = t.id AND gs.is_voided = 0 AND DATE(gs.start_time) >= ? AND DATE(gs.start_time) <= ?
     WHERE t.is_deleted = 0 AND t.type != 'kubo'
     GROUP BY t.id, t.table_number, t.type
     ORDER BY played_seconds ASC
@@ -409,11 +409,12 @@ render_header('Reports', 'reports');
             <th>Table</th>
             <th>Cashier</th>
             <th>Reason</th>
+            <th style="text-align:right;">Amount Voided</th>
           </tr>
         </thead>
         <tbody>
           <?php if (empty($voidRows)): ?>
-            <tr><td colspan="4" style="text-align:center; color:var(--muted);">No voided sessions recently.</td></tr>
+            <tr><td colspan="5" style="text-align:center; color:var(--muted);">No voided sessions recently.</td></tr>
           <?php else: ?>
             <?php foreach ($voidRows as $v): ?>
               <tr>
@@ -421,6 +422,7 @@ render_header('Reports', 'reports');
                 <td><strong><?php echo h($v['table_number']); ?></strong></td>
                 <td><?php echo h($v['cashier_name'] ?? 'Unknown'); ?></td>
                 <td style="color:#ef4444; font-weight:500;"><?php echo h($v['void_reason'] ?: 'No Reason'); ?></td>
+                <td style="text-align:right; font-weight:bold; color:var(--danger);">₱<?php echo number_format((float)$v['total_amount'], 2); ?></td>
               </tr>
             <?php endforeach; ?>
           <?php endif; ?>

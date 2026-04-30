@@ -51,7 +51,7 @@ function deadPeriodsForTable(int $tableId, string $date, string $startT, string 
     $st = db()->prepare("
         SELECT start_time, COALESCE(end_time, scheduled_end_time) AS eff_end
         FROM game_sessions
-        WHERE table_id = ?
+        WHERE table_id = ? AND is_voided = 0
         AND start_time < ?
         AND COALESCE(end_time, scheduled_end_time, '2099-12-31 23:59:59') > ?
         ORDER BY start_time ASC
@@ -95,7 +95,7 @@ foreach ($daysList as $day) {
 $incStmt = db()->prepare("
     SELECT t.type, COALESCE(SUM(gs.total_amount),0) AS total
     FROM game_sessions gs JOIN tables t ON t.id = gs.table_id
-    WHERE DATE(gs.start_time) >= ? AND DATE(gs.start_time) <= ? AND gs.end_time IS NOT NULL
+    WHERE DATE(gs.start_time) >= ? AND DATE(gs.start_time) <= ? AND gs.end_time IS NOT NULL AND gs.is_voided = 0
     GROUP BY t.type
 ");
 $incStmt->execute([$dtFrom, $dtTo]);
