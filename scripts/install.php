@@ -118,7 +118,7 @@ try {
       duration_hours DECIMAL(4,1) NOT NULL DEFAULT 1,
       down_payment DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       notes TEXT NULL,
-      status ENUM('pending','confirmed','completed','cancelled','no_show') NOT NULL DEFAULT 'pending',
+      status ENUM('pending','confirmed','started','completed','cancelled','no_show') NOT NULL DEFAULT 'pending',
       created_by INT UNSIGNED NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_res_table FOREIGN KEY (table_id) REFERENCES tables(id),
