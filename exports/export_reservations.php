@@ -162,8 +162,8 @@ foreach ($sessions as $s) {
 
     $h = intdiv((int) $durSecs, 3600);
     $m = intdiv((int) $durSecs % 3600, 60);
-    $s = $durSecs % 60;
-    $totalTimeFmt = sprintf('%02d:%02d:%02d', $h, $m, $s);
+    $sec = $durSecs % 60;
+    $totalTimeFmt = sprintf('%02d:%02d:%02d', $h, $m, $sec);
 
     $shiftForRow = getShiftLabel($s['start_time'], $morningStartMinutes, $eveningStartMinutes);
     if ($shiftFilter === 'morning' && $shiftForRow !== 'MORNING')
