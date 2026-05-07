@@ -18,15 +18,15 @@ function fmtDur(int $secs): string {
     $totalMins = max(0, (int)round($secs / 60));
     $h = intdiv($totalMins, 60);
     $m = $totalMins % 60;
-    if ($h > 0 && $m > 0) return "{$h}hr {$m}min";
-    if ($h > 0) return "{$h}hr";
-    if ($m > 0) return "{$m}min";
-    return "0min";
+    if ($h > 0 && $m > 0) return "{$h} hr {$m} min";
+    if ($h > 0) return "{$h} hr";
+    if ($m > 0) return "{$m} min";
+    return "0 min";
 }
 
 // ── Get all active tables ──
 $allTables = db()->query("
-    SELECT id, table_number, type FROM tables WHERE is_deleted = 0 AND type != 'kubo'
+    SELECT id, table_number, type FROM tables WHERE is_deleted = 0 AND is_disabled = 0 AND type != 'kubo'
     ORDER BY CASE type WHEN 'regular' THEN 1 WHEN 'vip' THEN 2 WHEN 'ktv' THEN 3 END, table_number ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -119,7 +119,8 @@ $cellStyle  = "text-align:center; padding:4px 6px; font-size:11px; font-family:A
 $brkHdrStyle = "background-color:#d4edda; font-weight:bold; text-align:center; padding:5px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ccc;";
 $brkLabel   = "text-align:right; font-weight:bold; padding:4px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ddd;";
 $brkVal     = "text-align:right; padding:4px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ddd;";
-$totStyle   = "background-color:#fff3cd; font-weight:bold; text-align:right; padding:4px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ccc;";
+$totStyle   = "background-color:#fcd5b4; font-weight:bold; text-align:right; padding:4px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ddd; color:#000000;";
+$totVal     = "background-color:#fcd5b4; font-weight:bold; text-align:right; padding:4px 8px; font-size:11px; font-family:Arial,sans-serif; border:1px solid #ddd; color:#000000;";
 $emptyBdr   = "border:none;";
 
 echo '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>';
@@ -146,7 +147,8 @@ foreach ($daysList as $dayIdx => $day) {
 
         // ═══ DEAD TIME title (first group, first day only) ═══
         if ($gi === 0 && $dayIdx === 0) {
-            echo "<tr><td colspan='{$totalCols}' style='text-align:center; font-weight:bold; font-size:13px; background:#f8d7da; padding:6px; border:1px solid #ccc; font-family:Arial,sans-serif;'>DEAD TIME</td></tr>";
+            $timeHeader = "DEAD TIME (" . date('g:i A', strtotime($dtStart)) . " to " . date('g:i A', strtotime($dtEnd)) . ")";
+            echo "<tr><td colspan='{$totalCols}' style='text-align:center; font-weight:bold; font-size:13px; background:#f8d7da; padding:6px; border:1px solid #ccc; font-family:Arial,sans-serif;'>{$timeHeader}</td></tr>";
         }
 
         // ═══ Table name headers ═══
@@ -203,7 +205,7 @@ foreach ($daysList as $dayIdx => $day) {
                     echo "<td style='{$brkVal}'>{$brkRows[$i][1]}</td>";
                 } elseif ($i === 3) {
                     echo "<td colspan='2' style='{$totStyle}'>GRAND TOTAL</td>";
-                    echo "<td style='{$totStyle}'>₱" . number_format($grandTotal, 2) . "</td>";
+                    echo "<td style='{$totVal}'>₱" . number_format($grandTotal, 2) . "</td>";
                 } else {
                     echo "<td style='{$emptyBdr}'></td><td style='{$emptyBdr}'></td><td style='{$emptyBdr}'></td>";
                 }

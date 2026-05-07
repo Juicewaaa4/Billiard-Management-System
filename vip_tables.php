@@ -1062,24 +1062,12 @@ const busyCustomers = <?php echo json_encode($busyCustomerIds); ?>;
     const total = startRate * startHours;
     document.getElementById('startTotal').textContent = '₱' + total.toFixed(2);
     
-    const dpVal = parseFloat(r.down_payment) || 0;
-    const req = Math.max(0, total - dpVal);
+    startDownPayment = parseFloat(r.down_payment) || 0;
+    const req = Math.max(0, total - startDownPayment);
     const startPayment = document.getElementById('startPayment');
     startPayment.placeholder = 'Amount to pay: ₱' + req.toFixed(2);
     
-    // Override calculate change logic to factor down payment
-    startPayment.removeEventListener('input', updateStartChange);
-    const resUpdateChange = function() {
-      const pay = parseFloat(document.getElementById('startPayment').value) || 0;
-      const t = startRate * startHours;
-      const requiredPay = Math.max(0, t - dpVal);
-      const change = pay - requiredPay;
-      const el = document.getElementById('startChange');
-      el.textContent = '₱' + change.toFixed(2);
-      el.style.color = change >= 0 ? 'var(--success)' : 'var(--danger)';
-    };
-    startPayment.addEventListener('input', resUpdateChange);
-    resUpdateChange();
+    updateStartChange();
   });
   <?php endif; ?>
 
@@ -1107,10 +1095,10 @@ document.querySelectorAll('[data-countdown]').forEach(el => {
 });
 
 // ── Start Game Modal ──
-let startTableId = 0, startRate = 0, startHours = 0;
+let startTableId = 0, startRate = 0, startHours = 0, startDownPayment = 0;
 
 function openStartModal(tableId, tableName, rate, maxHours, isKtv = false) {
-  startTableId = tableId; startRate = rate; startHours = 0;
+  startTableId = tableId; startRate = rate; startHours = 0; startDownPayment = 0;
   document.getElementById('startTableName').textContent = tableName;
   document.getElementById('startRate').textContent = '₱' + rate.toFixed(2) + '/hr';
   document.getElementById('startHours').textContent = '0';
@@ -1179,7 +1167,8 @@ document.getElementById('startPayment').addEventListener('input', updateStartCha
 function updateStartChange() {
   const pay = parseFloat(document.getElementById('startPayment').value) || 0;
   const total = startRate * startHours;
-  const change = pay - total;
+  const requiredPay = Math.max(0, total - startDownPayment);
+  const change = pay - requiredPay;
   const el = document.getElementById('startChange');
   el.textContent = '₱' + change.toFixed(2);
   el.style.color = change >= 0 ? 'var(--success)' : 'var(--danger)';
@@ -1194,8 +1183,9 @@ function submitStart() {
 
   if (startHours <= 0) { showWarnModal('⏰ Select Hours', 'Please select how many hours before starting the game.'); return; }
   const total = startRate * startHours;
+  const requiredPay = Math.max(0, total - startDownPayment);
   const pay = parseFloat(document.getElementById('startPayment').value) || 0;
-  if (pay < total - 0.01) { showWarnModal('💰 Insufficient Payment', 'Payment is not enough. Required: ₱' + total.toFixed(2)); return; }
+  if (pay < requiredPay - 0.01) { showWarnModal('💰 Insufficient Payment', 'Payment is not enough. Required: ₱' + requiredPay.toFixed(2)); return; }
 
   document.getElementById('sf_table_id').value = startTableId;
   document.getElementById('sf_customer_id').value = document.getElementById('startCustomer').value;
