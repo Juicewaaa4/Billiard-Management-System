@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       flash_set('ok', 'Customer added.');
       redirect('customers.php');
     }
-
+    
     if ($action === 'edit_customer') {
       $id = (int)($_POST['id'] ?? 0);
       $name = trim((string)($_POST['name'] ?? ''));

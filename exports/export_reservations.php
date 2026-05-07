@@ -60,10 +60,9 @@ if ($to) {
 $whereResStr = count($whereRes) ? " AND " . implode(" AND ", $whereRes) : "";
 
 $noShowsStmt = db()->prepare("
-    SELECT r.*, c.name as customer_name, t.table_number, t.type as table_type, u.username as cashier_name
+    SELECT r.*, r.customer_name, t.table_number, t.type as table_type, u.username as cashier_name
     FROM reservations r
     JOIN tables t ON t.id = r.table_id
-    LEFT JOIN customers c ON c.id = r.customer_id
     LEFT JOIN users u ON u.id = r.created_by
     WHERE r.status = 'no_show' $whereResStr
 ");
