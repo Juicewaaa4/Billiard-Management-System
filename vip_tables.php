@@ -14,6 +14,11 @@ header('Pragma: no-cache');
 start_app_session();
 require_role(['admin', 'cashier']);
 
+try {
+  db()->exec("ALTER TABLE game_sessions ADD COLUMN loyalty_hours INT NOT NULL DEFAULT 0");
+} catch (Throwable $e) {
+  // Column already exists or error
+}
 
 $flash = null;
 
@@ -250,6 +255,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       $returnUrl = (string)($_POST['return_url'] ?? 'vip_tables.php');
       flash_set('ok', 'Extended by ' . $hours . 'h. Additional: ₱' . number_format($cost, 2));
+      redirect($returnUrl);
+    }
+
+    if ($action === 'add_loyalty') {
+      $sessionId = (int) ($_POST['session_id'] ?? 0);
+
+      if ($sessionId <= 0)
+        throw new RuntimeException('Invalid session.');
+
+      $s = db()->prepare("SELECT gs.* FROM game_sessions gs WHERE gs.id=? AND gs.end_time IS NULL LIMIT 1");
+      $s->execute([$sessionId]);
+      $session = $s->fetch();
+      if (!$session)
+        throw new RuntimeException('Session not found or already ended.');
+
+      db()->beginTransaction();
+
+      db()->prepare("
+        UPDATE game_sessions
+        SET scheduled_end_time = DATE_ADD(scheduled_end_time, INTERVAL 1 HOUR),
+            hours_purchased = hours_purchased + 1,
+            duration_seconds = duration_seconds + 3600,
+            loyalty_hours = loyalty_hours + 1
+        WHERE id = ?
+      ")->execute([$sessionId]);
+
+      db()->commit();
+
+      $returnUrl = (string)($_POST['return_url'] ?? 'vip_tables.php');
+      flash_set('ok', '1 Hour Loyalty Added (Free).');
       redirect($returnUrl);
     }
 
@@ -541,6 +576,7 @@ render_header('VIP Table With Karaoke', 'vip_tables');
           <div style="display:flex; gap:8px;">
             <button class="btn btn--primary" type="button" style="flex:1;" onclick="openExtendModal(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float)$active['rate_per_hour']; ?>, '<?php echo h($active['scheduled_end_time'] ?? ''); ?>', <?php echo $maxExtH; ?>)">Extend</button>
             <button class="btn btn--danger" type="button" style="flex:1; background: #ef4444; border-color: #ef4444;" onclick="voidGame(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>')">Void</button>
+            <button class="btn btn--ok" type="button" style="flex:1; background: #fdba74; border-color: #fdba74; color: #fff;" onclick="openLoyaltyModal(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>')">+Loyalty</button>
             <button class="btn btn--ghost" type="button" style="flex:1;" onclick="openEndModal(<?php echo (int)$active['id']; ?>, '<?php echo h($t['table_number']); ?>')">End Game</button>
           </div>
         <?php else: ?>
@@ -929,6 +965,10 @@ render_header('VIP Table With Karaoke', 'vip_tables');
   <input type="hidden" name="action" value="end_game">
   <input type="hidden" name="session_id" id="endf_session_id">
 </form>
+<form id="loyaltyForm" method="post" style="display:none;">
+  <input type="hidden" name="action" value="add_loyalty">
+  <input type="hidden" name="session_id" id="loyalty_session_id">
+</form>
 
 <!-- End Game Modal -->
 <div id="endModal" class="game-modal" style="display:none;">
@@ -976,7 +1016,25 @@ render_header('VIP Table With Karaoke', 'vip_tables');
   </div>
 </div>
 
-
+<!-- Loyalty Modal -->
+<div id="loyaltyModal" class="game-modal" style="display:none;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>🎁 Add +Loyalty (1 Hour Free)</h3>
+      <span class="game-modal__close" onclick="closeLoyaltyModal()">&times;</span>
+    </div>
+    <div class="game-modal__body" style="padding:28px 24px; text-align:center;">
+      <div style="width:56px; height:56px; margin:0 auto 16px; border-radius:50%; background:rgba(245,158,11,0.12); display:flex; align-items:center; justify-content:center; font-size:28px;">
+        🎁</div>
+      <p style="color:var(--text); font-size:15px; margin:0 0 8px;">Are you sure you want to add <strong>1 Free Hour</strong> of loyalty time to <strong id="loyaltyTableName"></strong>?</p>
+      <p style="color:var(--muted); font-size:13px; margin:0;">This will not be charged and will reflect as a loyalty reward in exports.</p>
+      <div class="game-modal__footer" style="justify-content:center; margin-top:24px;">
+        <button type="button" class="btn btn--ghost" onclick="closeLoyaltyModal()">Cancel</button>
+        <button type="button" class="btn" style="background:#fdba74; color:#fff; border:none;" onclick="submitLoyalty()">Confirm +Loyalty</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <style>
 .game-modal { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center; }
@@ -1330,14 +1388,32 @@ function submitEnd() {
   document.getElementById('endForm').submit();
 }
 
+// ── Loyalty Game via Modal ──
+let loyaltySessionId = 0;
+function openLoyaltyModal(sessionId, tableName) {
+  loyaltySessionId = sessionId;
+  document.getElementById('loyaltyTableName').textContent = tableName;
+  document.getElementById('loyaltyModal').style.display = 'flex';
+}
+
+function closeLoyaltyModal() {
+  document.getElementById('loyaltyModal').style.display = 'none';
+}
+
+function submitLoyalty() {
+  document.getElementById('loyalty_session_id').value = loyaltySessionId;
+  document.getElementById('loyaltyForm').submit();
+}
+
 // Close modals on backdrop click
-['startModal','extendModal','endModal','voidModal'].forEach(id => {
+['startModal','extendModal','endModal','voidModal','loyaltyModal'].forEach(id => {
   document.getElementById(id).addEventListener('click', e => {
     if (e.target.id === id) {
       if (id === 'startModal') closeStartModal();
       else if (id === 'extendModal') closeExtendModal();
       else if (id === 'endModal') closeEndModal();
-      else closeVoidModal();
+      else if (id === 'voidModal') closeVoidModal();
+      else closeLoyaltyModal();
     }
   });
 });

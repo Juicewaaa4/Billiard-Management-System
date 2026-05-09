@@ -182,7 +182,8 @@ foreach ($sessions as $s) {
         'ktv' => $s['table_type'] === 'ktv' ? 'Yes' : 'No',
         'cashier' => $s['cashier_name'] ? ucwords(str_replace('_', ' ', $s['cashier_name'])) : 'Unknown',
         'transaction_date' => "'" . date('m/d/Y h:i A', strtotime($s['end_time'] ?? $s['created_at'])),
-        'shift' => $shiftForRow
+        'shift' => $shiftForRow,
+        'loyalty_hours' => (int)($s['loyalty_hours'] ?? 0)
     ];
 }
 
@@ -271,17 +272,19 @@ function print_group_rows($groupLabel, $shiftLabel, $rows, $printHeaders = false
     }
 
     foreach ($rows as $row) {
+        $bgStyle = (!empty($row['loyalty_hours'])) ? "background-color: #fdba74;" : "";
+        
         echo '<tr>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['id']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['customer']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['table']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['time_range']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['total_time']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . number_format($row['downpayment'], 0) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . number_format($row['total_cost'], 0) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . $row['ktv'] . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['cashier']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000;">' . htmlspecialchars((string) $row['transaction_date']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['id']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['customer']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['table']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['time_range']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['total_time']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . number_format($row['downpayment'], 0) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . number_format($row['total_cost'], 0) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . $row['ktv'] . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['cashier']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['transaction_date']) . '</td>';
         echo '</tr>';
     }
 }

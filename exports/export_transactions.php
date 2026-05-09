@@ -8,6 +8,9 @@ require_once __DIR__ . '/../includes/util.php';
 start_app_session();
 require_role(['admin', 'cashier']);
 
+try {
+  db()->exec("ALTER TABLE game_sessions ADD COLUMN loyalty_hours INT NOT NULL DEFAULT 0");
+} catch (Throwable $e) {}
 
 $fromDateStr = trim((string) ($_GET['from_date'] ?? $_GET['from'] ?? date('Y-m-d')));
 $fromTimeStr = trim((string) ($_GET['from_time'] ?? ''));
@@ -62,6 +65,7 @@ $sql = "
     SUM(tx.change_amount) AS change_amount,
     gs.karaoke_included,
     gs.is_promo,
+    COALESCE(gs.loyalty_hours, 0) AS loyalty_hours,
     gs.rate_per_hour,
     MIN(u.username) AS cashier,
     COUNT(tx.id) AS tx_count
@@ -228,7 +232,9 @@ foreach (['MORNING', 'EVENING'] as $shiftKey) {
          
          // Row colors
          $bgStyle = "";
-         if (!empty($r['is_promo'])) {
+         if (!empty($r['loyalty_hours'])) {
+             $bgStyle = "background-color: #fdba74;"; // LOYALTY CARD (orange)
+         } elseif (!empty($r['is_promo'])) {
              $bgStyle = "background-color: #fbcfe8;"; // EB PROMO (pink)
          }
          
