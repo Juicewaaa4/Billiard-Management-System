@@ -15,7 +15,8 @@ try {
       t.type, 
       COALESCE(c.name, NULLIF(gs.walk_in_name, ''), 'Walk-in') AS player_name, 
       gs.scheduled_end_time, 
-      gs.rate_per_hour
+      gs.rate_per_hour,
+      gs.karaoke_included
     FROM game_sessions gs
     JOIN tables t ON gs.table_id = t.id
     LEFT JOIN customers c ON c.id = gs.customer_id
@@ -30,7 +31,10 @@ try {
       gs.id AS session_id, 
       t.table_number, 
       t.type, 
-      COALESCE(c.name, NULLIF(gs.walk_in_name, ''), 'Walk-in') AS player_name 
+      COALESCE(c.name, NULLIF(gs.walk_in_name, ''), 'Walk-in') AS player_name,
+      gs.scheduled_end_time,
+      gs.rate_per_hour,
+      gs.karaoke_included
     FROM game_sessions gs
     JOIN tables t ON gs.table_id = t.id
     LEFT JOIN customers c ON c.id = gs.customer_id

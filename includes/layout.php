@@ -132,17 +132,36 @@ function render_footer(): void
     <!-- Time's Up Alert Modal (Global) -->
     <div id="globalTimeoutModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='globalTimeoutModal')closeGlobalTimeoutModal()">
       <div class="global-modal__box">
-        <div class="global-modal__header">
-          <h3 style="color:white; margin:0; display:flex; align-items:center; gap:8px;">⏰ Time's Up!</h3>
+        <div class="global-modal__header" id="globalToHeader">
+          <h3 style="color:white; margin:0; display:flex; align-items:center; gap:8px;" id="globalToTitle">⏰ Time's Up!</h3>
           <span class="global-modal__close" onclick="closeGlobalTimeoutModal()">&times;</span>
         </div>
         <div class="global-modal__body">
-          <div style="font-size:42px; margin-bottom:12px; animation: globalPulse 1s infinite;">🚨</div>
-          <h2 style="margin:0 0 8px; font-size:22px; color:var(--text);">Table: <span id="globalToTableName" style="color:var(--primary);"></span></h2>
+          <div style="font-size:42px; margin-bottom:12px; animation: globalPulse 1s infinite;" id="globalToIcon">🚨</div>
+          <h2 style="margin:0 0 8px; font-size:22px; color:var(--text);"><span id="globalToLabel">Table:</span> <span id="globalToTableName" style="color:var(--primary);"></span></h2>
           <p style="margin:0 0 24px; font-size:16px; color:var(--muted);">Player: <span id="globalToPlayerName" style="color:var(--text); font-weight:700;"></span></p>
           <div style="display:flex; gap:12px; justify-content:center; margin-top:24px;">
              <button type="button" class="btn btn--primary" id="globalExtendBtn" style="flex:1;">Extend</button>
              <button type="button" class="btn btn--danger" id="globalEndBtn" style="flex:1;">End Game</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10-Mins Warning Alert Modal (Global) -->
+    <div id="globalWarningModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='globalWarningModal')closeGlobalWarningModal()">
+      <div class="global-modal__box">
+        <div class="global-modal__header" style="background:#f59e0b;" id="globalWarnHeader">
+          <h3 style="color:white; margin:0; display:flex; align-items:center; gap:8px;" id="globalWarnTitle">⏳ 10 Mins Remaining</h3>
+          <span class="global-modal__close" onclick="closeGlobalWarningModal()">&times;</span>
+        </div>
+        <div class="global-modal__body">
+          <div style="font-size:42px; margin-bottom:12px; animation: globalPulse 1s infinite;" id="globalWarnIcon">⚠️</div>
+          <h2 style="margin:0 0 8px; font-size:22px; color:var(--text);"><span id="globalWarnLabel">Table:</span> <span id="globalWarnTableName" style="color:var(--primary);"></span></h2>
+          <p style="margin:0 0 24px; font-size:16px; color:var(--muted);">Player: <span id="globalWarnPlayerName" style="color:var(--text); font-weight:700;"></span></p>
+          <div style="display:flex; gap:12px; justify-content:center; margin-top:24px;">
+             <button type="button" class="btn btn--primary" id="globalWarnExtendBtn" style="flex:1;">Extend Now</button>
+             <button type="button" class="btn btn--ghost" onclick="closeGlobalWarningModal()" style="flex:1;">Dismiss</button>
           </div>
         </div>
       </div>
@@ -238,6 +257,10 @@ function render_footer(): void
         document.getElementById('globalTimeoutModal').style.display = 'none';
       }
 
+      function closeGlobalWarningModal() {
+        document.getElementById('globalWarningModal').style.display = 'none';
+      }
+
       function checkTimeoutsGlobally() {
         fetch('api/api_check_timeouts.php')
           .then(res => res.json())
@@ -249,7 +272,35 @@ function render_footer(): void
                    if (!globalAlertedWarnings.has(w.session_id)) {
                       globalAlertedWarnings.add(w.session_id);
                       playGlobalWarningSound();
-                      showWarningToast('<b>' + w.table_number + '</b> (' + w.player_name + ') has less than 10 mins remaining!');
+                      
+                      const isKuboKaraoke = w.type === 'kubo';
+                      const warnLabel = isKuboKaraoke ? '🎤 Karaoke:' : 'Table:';
+                      const warnTitle = isKuboKaraoke ? '🎤 Karaoke - 10 Mins Remaining' : '⏳ 10 Mins Remaining';
+                      const warnIcon = isKuboKaraoke ? '🎤' : '⚠️';
+                      
+                      document.getElementById('globalWarnTitle').textContent = warnTitle;
+                      document.getElementById('globalWarnLabel').textContent = warnLabel;
+                      document.getElementById('globalWarnIcon').textContent = warnIcon;
+                      if (isKuboKaraoke) {
+                        document.getElementById('globalWarnHeader').style.background = '#a855f7';
+                      } else {
+                        document.getElementById('globalWarnHeader').style.background = '#f59e0b';
+                      }
+                      document.getElementById('globalWarnTableName').textContent = w.table_number + (w.type === 'vip' ? ' (VIP)' : '');
+                      document.getElementById('globalWarnPlayerName').textContent = w.player_name;
+                      
+                      document.getElementById('globalWarnExtendBtn').onclick = function() {
+                        closeGlobalWarningModal();
+                        if (isKuboKaraoke) {
+                          window.location.href = 'kubo.php';
+                        } else if (typeof openExtendModal === 'function') {
+                          openExtendModal(w.session_id, w.table_number + (w.type === 'vip' ? ' (VIP)' : ''), parseFloat(w.rate_per_hour), w.scheduled_end_time, w.type);
+                        } else {
+                          window.location.href = w.type === 'vip' ? 'vip_tables.php' : 'tables.php';
+                        }
+                      };
+                      
+                      document.getElementById('globalWarningModal').style.display = 'flex';
                    }
                  });
                }
@@ -262,12 +313,30 @@ function render_footer(): void
                    globalAlertedSessions.add(session.session_id);
                    playGlobalAlarmSound();
                    
+                   const isKuboKaraoke = session.type === 'kubo';
+                   const toLabel = isKuboKaraoke ? '🎤 Karaoke:' : 'Table:';
+                   const toTitle = isKuboKaraoke ? '🎤 Karaoke Time\'s Up!' : '⏰ Time\'s Up!';
+                   const toIcon = isKuboKaraoke ? '🎤' : '🚨';
+                   const endLabel = isKuboKaraoke ? 'End Karaoke' : 'End Game';
+                   
+                   document.getElementById('globalToTitle').textContent = toTitle;
+                   document.getElementById('globalToLabel').textContent = toLabel;
+                   document.getElementById('globalToIcon').textContent = toIcon;
+                   document.getElementById('globalEndBtn').textContent = endLabel;
+                   if (isKuboKaraoke) {
+                     document.getElementById('globalToHeader').style.background = '#a855f7';
+                   } else {
+                     document.getElementById('globalToHeader').style.background = 'var(--danger)';
+                   }
+                   
                    document.getElementById('globalToTableName').textContent = session.table_number + (session.type === 'vip' ? ' (VIP)' : '');
                    document.getElementById('globalToPlayerName').textContent = session.player_name;
                    
                    document.getElementById('globalExtendBtn').onclick = function() {
                      closeGlobalTimeoutModal();
-                     if (typeof openExtendModal === 'function') {
+                     if (isKuboKaraoke) {
+                       window.location.href = 'kubo.php';
+                     } else if (typeof openExtendModal === 'function') {
                        openExtendModal(session.session_id, session.table_number + (session.type === 'vip' ? ' (VIP)' : ''), parseFloat(session.rate_per_hour), session.scheduled_end_time, session.type);
                      } else {
                        window.location.href = session.type === 'vip' ? 'vip_tables.php' : 'tables.php';
@@ -276,7 +345,9 @@ function render_footer(): void
                    
                    document.getElementById('globalEndBtn').onclick = function() {
                      closeGlobalTimeoutModal();
-                     if (typeof openEndModal === 'function') {
+                     if (isKuboKaraoke) {
+                       window.location.href = 'kubo.php';
+                     } else if (typeof openEndModal === 'function') {
                        openEndModal(session.session_id, session.table_number + (session.type === 'vip' ? ' (VIP)' : ''), session.type);
                      } else {
                        window.location.href = session.type === 'vip' ? 'vip_tables.php' : 'tables.php';

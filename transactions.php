@@ -34,11 +34,14 @@ $sql = "
     gs.games_earned,
     gs.games_redeemed,
     t.table_number,
+    t.type AS table_type,
     c.name AS customer_name,
     gs.walk_in_name,
     SUM(tx.payment) AS payment,
     SUM(tx.change_amount) AS change_amount,
-    MAX(tx.paid_at) AS paid_at
+    MAX(tx.paid_at) AS paid_at,
+    COALESCE(gs.loyalty_hours, 0) AS loyalty_hours,
+    gs.karaoke_included
   FROM game_sessions gs
   JOIN tables t ON t.id = gs.table_id
   LEFT JOIN customers c ON c.id = gs.customer_id
@@ -51,7 +54,48 @@ $sql = "
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
-$rows = $stmt->fetchAll();
+$gameRows = $stmt->fetchAll();
+
+// Also fetch Kubo rentals
+$kuboWhere = ["kr.status = 'completed'"];
+$kuboParams = [];
+if ($from) { $kuboWhere[] = "DATE(kr.end_time) >= ?"; $kuboParams[] = $from; }
+if ($to) { $kuboWhere[] = "DATE(kr.end_time) <= ?"; $kuboParams[] = $to; }
+
+$kuboSql = "
+  SELECT
+    kr.id,
+    kr.created_at AS start_time,
+    kr.end_time,
+    TIMESTAMPDIFF(SECOND, kr.created_at, kr.end_time) AS duration_seconds,
+    kr.payment_amount AS total_amount,
+    0 AS discount_amount,
+    0 AS games_earned,
+    0 AS games_redeemed,
+    t.table_number,
+    'kubo' AS table_type,
+    kr.customer_name,
+    '' AS walk_in_name,
+    kr.payment_amount AS payment,
+    0 AS change_amount,
+    kr.end_time AS paid_at,
+    0 AS loyalty_hours,
+    0 AS karaoke_included
+  FROM kubo_rentals kr
+  JOIN tables t ON t.id = kr.table_id
+  WHERE " . implode(' AND ', $kuboWhere) . "
+  ORDER BY kr.end_time DESC
+  LIMIT 100
+";
+$kuboStmt = db()->prepare($kuboSql);
+$kuboStmt->execute($kuboParams);
+$kuboRows = $kuboStmt->fetchAll();
+
+// Merge and sort by end_time DESC
+$rows = array_merge($gameRows, $kuboRows);
+usort($rows, function($a, $b) {
+  return strtotime($b['end_time']) - strtotime($a['end_time']);
+});
 
 $customers = db()->query("SELECT id, name FROM customers ORDER BY name ASC")->fetchAll();
 
@@ -124,6 +168,7 @@ render_header('Transactions', 'transactions');
           <th style="text-align:right;">Total</th>
           <th style="text-align:right;">Payment</th>
           <th style="text-align:right;">Change</th>
+          <th style="text-align:center;">Loyalty</th>
           <th style="text-align:center;">Action</th>
         </tr>
       </thead>
@@ -136,10 +181,17 @@ render_header('Transactions', 'transactions');
           $s = $dur % 60;
           $durFmt = sprintf('%02d:%02d:%02d', $h, $m, $s);
           $cust = $r['customer_name'] ?: ($r['walk_in_name'] ?: 'Walk-in');
+          $isKubo = ($r['table_type'] ?? '') === 'kubo';
+          $loyalty = (int)($r['loyalty_hours'] ?? 0);
+          $rowBg = $loyalty > 0 ? 'background-color:rgba(253,186,116,0.15);' : '';
         ?>
-        <tr>
+        <tr style="<?php echo $rowBg; ?>">
           <td><span style="color:var(--muted); font-size:13px;">#<?php echo (int)$r['id']; ?></span></td>
-          <td><span class="badge" style="background:var(--bg); border:1px solid var(--border); color:var(--text); font-weight:700;"><?php echo h($r['table_number']); ?></span></td>
+          <td>
+            <span class="badge" style="background:<?php echo $isKubo ? 'rgba(34,197,94,0.15)' : 'var(--bg)'; ?>; border:1px solid <?php echo $isKubo ? '#22c55e' : 'var(--border)'; ?>; color:<?php echo $isKubo ? '#22c55e' : 'var(--text)'; ?>; font-weight:700;">
+              <?php echo h($r['table_number']); ?><?php if ($isKubo): ?> 🏠<?php endif; ?>
+            </span>
+          </td>
           <td><strong style="color:var(--text);"><?php echo h($cust); ?></strong></td>
           <td style="color:var(--muted); font-size:13px;"><?php echo h(date('M j, g:i A', strtotime($r['start_time']))); ?></td>
           <td style="color:var(--muted); font-size:13px;"><?php echo h(date('g:i A', strtotime($r['end_time']))); ?></td>
@@ -148,7 +200,18 @@ render_header('Transactions', 'transactions');
           <td style="text-align:right; font-weight:700; color:#22c55e;"><?php echo money((float)($r['payment'] ?? 0)); ?></td>
           <td style="text-align:right; color:var(--muted);"><?php echo money((float)($r['change_amount'] ?? 0)); ?></td>
           <td style="text-align:center;">
-            <a class="btn btn--ghost" href="receipt.php?session_id=<?php echo (int)$r['id']; ?>" style="padding:4px 10px; font-size:12px;">View Receipt</a>
+            <?php if ($loyalty > 0): ?>
+              <span class="badge" style="background:#fdba74; color:#7c2d12; font-weight:700; font-size:11px;">+<?php echo $loyalty; ?>h Loyalty</span>
+            <?php else: ?>
+              <span style="color:var(--muted);">—</span>
+            <?php endif; ?>
+          </td>
+          <td style="text-align:center;">
+            <?php if (!$isKubo): ?>
+              <a class="btn btn--ghost" href="receipt.php?session_id=<?php echo (int)$r['id']; ?>" style="padding:4px 10px; font-size:12px;">View Receipt</a>
+            <?php else: ?>
+              <span style="color:var(--muted); font-size:12px;">Kubo</span>
+            <?php endif; ?>
           </td>
         </tr>
       <?php endforeach; ?>

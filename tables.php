@@ -817,7 +817,7 @@ render_header('Tables', 'tables');
   <input type="hidden" name="action" value="start_game">
   <input type="hidden" name="table_id" id="sf_table_id">
   <input type="hidden" name="customer_id" id="sf_customer_id">
-
+  <input type="hidden" name="walk_in_name" id="sf_walk_in_name">
   <input type="hidden" name="hours" id="sf_hours">
   <input type="hidden" name="payment" id="sf_payment">
   <input type="hidden" name="is_promo" id="sf_promo" value="0">
@@ -1211,6 +1211,9 @@ render_header('Tables', 'tables');
 
     document.getElementById('sf_table_id').value = startTableId;
     document.getElementById('sf_customer_id').value = document.getElementById('startCustomer').value;
+    // Send walk-in name (from reservation or manually typed)
+    const walkInName = document.getElementById('newCustName').value.trim();
+    document.getElementById('sf_walk_in_name').value = walkInName;
 
     document.getElementById('sf_hours').value = startHours;
     document.getElementById('sf_payment').value = pay;

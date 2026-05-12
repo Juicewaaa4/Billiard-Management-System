@@ -76,42 +76,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
   exit;
 }
 
-$range = (string)($_GET['range'] ?? 'daily');
-if (!in_array($range, ['daily', 'weekly'], true)) $range = 'daily';
-
-if ($range === 'daily') {
-  $incomeRows = db()->query("
-    SELECT d, SUM(total) AS total FROM (
-      SELECT DATE(end_time) AS d, COALESCE(SUM(total_amount),0) AS total
-      FROM game_sessions
-      WHERE end_time IS NOT NULL AND is_voided = 0 AND end_time >= DATE_SUB(NOW(), INTERVAL 14 DAY)
-      GROUP BY DATE(end_time)
-      UNION ALL
-      SELECT rental_date AS d, COALESCE(SUM(payment_amount),0) AS total
-      FROM kubo_rentals
-      WHERE status = 'completed' AND rental_date >= DATE_SUB(NOW(), INTERVAL 14 DAY)
-      GROUP BY rental_date
-    ) combined
-    GROUP BY d
-    ORDER BY d DESC
-  ")->fetchAll();
-} else {
-  $incomeRows = db()->query("
-    SELECT yw, MIN(week_start) AS week_start, SUM(total) AS total FROM (
-      SELECT YEARWEEK(end_time, 1) AS yw, MIN(DATE(end_time)) AS week_start, COALESCE(SUM(total_amount),0) AS total
-      FROM game_sessions
-      WHERE end_time IS NOT NULL AND is_voided = 0 AND end_time >= DATE_SUB(NOW(), INTERVAL 12 WEEK)
-      GROUP BY YEARWEEK(end_time, 1)
-      UNION ALL
-      SELECT YEARWEEK(rental_date, 1) AS yw, MIN(rental_date) AS week_start, COALESCE(SUM(payment_amount),0) AS total
-      FROM kubo_rentals
-      WHERE status = 'completed' AND rental_date >= DATE_SUB(NOW(), INTERVAL 12 WEEK)
-      GROUP BY YEARWEEK(rental_date, 1)
-    ) combined
-    GROUP BY yw
-    ORDER BY yw DESC
-  ")->fetchAll();
-}
 
 $mostUsed = db()->query("
   SELECT t.table_number, COUNT(*) AS sessions_count
@@ -158,15 +122,16 @@ $dtStmt->execute([$dtFrom, $dtTo]);
 $dtRows = $dtStmt->fetchAll();
 
 // ── Fetch Voided Sessions ──
-$voidStmt = db()->query("
+$voidDate = parse_date((string)($_GET['void_date'] ?? date('Y-m-d')));
+$voidStmt = db()->prepare("
   SELECT gs.*, t.table_number, u.username as cashier_name
   FROM game_sessions gs
   JOIN tables t ON t.id = gs.table_id
   LEFT JOIN users u ON u.id = gs.created_by
-  WHERE gs.is_voided = 1
+  WHERE gs.is_voided = 1 AND DATE(gs.end_time) = ?
   ORDER BY gs.end_time DESC
-  LIMIT 20
 ");
+$voidStmt->execute([$voidDate]);
 $voidRows = $voidStmt->fetchAll();
 
 render_header('Reports', 'reports');
@@ -231,41 +196,6 @@ render_header('Reports', 'reports');
 </div>
 
 <div class="grid" style="grid-template-columns: 1fr; gap:14px;">
-  <div class="card">
-    <div class="row">
-      <div>
-        <div class="card__title">Income Report</div>
-        <div style="margin-top:6px;color:var(--muted);">Daily or weekly totals (based on completed sessions).</div>
-      </div>
-      <div class="spacer"></div>
-      <a class="btn <?php echo $range === 'daily' ? '' : 'btn--ghost'; ?>" href="reports.php?range=daily">Daily</a>
-      <a class="btn <?php echo $range === 'weekly' ? '' : 'btn--ghost'; ?>" href="reports.php?range=weekly">Weekly</a>
-    </div>
-
-    <div style="overflow:auto; margin-top:12px;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th><?php echo $range === 'daily' ? 'Date' : 'Week'; ?></th>
-            <th>Total Income</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($incomeRows as $r): ?>
-            <tr>
-              <td>
-                <?php echo $range === 'daily'
-                  ? h((string)$r['d'])
-                  : ('Week of ' . h((string)$r['week_start'])); ?>
-              </td>
-              <td><strong><?php echo money((float)$r['total']); ?></strong></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
   <div class="grid grid--cards">
     <div class="card col-6">
       <div class="card__title">Most Used Tables (Last 30 days)</div>
@@ -395,11 +325,21 @@ render_header('Reports', 'reports');
 
   <!-- Voided Sessions Section -->
   <div class="card" style="margin-top:14px; border-left:4px solid #ef4444;">
-    <div class="row">
+    <div class="row" style="align-items:center; flex-wrap:wrap; gap:10px;">
       <div>
-        <div class="card__title" style="color:#ef4444;">Voided Sessions (Recent)</div>
+        <div class="card__title" style="color:#ef4444;">Voided Sessions</div>
         <div style="margin-top:6px;color:var(--muted);">Sessions that were cancelled or placed on the wrong table.</div>
       </div>
+      <div class="spacer"></div>
+      <form method="get" style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:13px; color:var(--muted);">Date:</span>
+        <input type="date" name="void_date" value="<?php echo h($voidDate); ?>" onchange="this.form.submit()" style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+        <?php if (isset($_GET['range'])): ?><input type="hidden" name="range" value="<?php echo h($_GET['range']); ?>"><?php endif; ?>
+        <?php if (isset($_GET['dt_from'])): ?><input type="hidden" name="dt_from" value="<?php echo h($_GET['dt_from']); ?>"><?php endif; ?>
+        <?php if (isset($_GET['dt_to'])): ?><input type="hidden" name="dt_to" value="<?php echo h($_GET['dt_to']); ?>"><?php endif; ?>
+        <?php if (isset($_GET['dt_start'])): ?><input type="hidden" name="dt_start" value="<?php echo h($_GET['dt_start']); ?>"><?php endif; ?>
+        <?php if (isset($_GET['dt_end'])): ?><input type="hidden" name="dt_end" value="<?php echo h($_GET['dt_end']); ?>"><?php endif; ?>
+      </form>
     </div>
     <div style="overflow:auto; margin-top:12px; max-height:250px;">
       <table class="table">

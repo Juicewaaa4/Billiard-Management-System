@@ -17,6 +17,10 @@ $activeTables = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='
 $availableTables = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='regular' AND status='available' AND is_deleted=0 AND is_disabled=0")->fetch()['c'];
 $ongoingGames = (int) db()->query("SELECT COUNT(*) AS c FROM game_sessions gs JOIN tables t ON gs.table_id = t.id WHERE gs.end_time IS NULL AND t.type='regular'")->fetch()['c'];
 
+$activeKubo = (int) db()->query("SELECT COUNT(DISTINCT kr.table_id) AS c FROM kubo_rentals kr JOIN tables t ON kr.table_id = t.id WHERE kr.status='active' AND t.type='kubo'")->fetch()['c'];
+$totalKubo = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='kubo' AND is_deleted=0 AND is_disabled=0")->fetch()['c'];
+$availableKubo = max(0, $totalKubo - $activeKubo);
+
 $selectedDate = $_GET['date'] ?? date('Y-m-d');
 $selectedDateObj = new DateTime($selectedDate);
 
@@ -156,6 +160,11 @@ render_header('Dashboard', 'dashboard');
     <div class="card__title">Active Regular Tables</div>
     <div class="card__value"><?php echo (int) $activeTables; ?></div>
     <div class="card__sub"><?php echo (int) $availableTables; ?> available</div>
+  </div>
+  <div class="card col-3">
+    <div class="card__title" style="color:#22c55e;">Available Kubo</div>
+    <div class="card__value" style="color:#22c55e;"><?php echo (int) $availableKubo; ?></div>
+    <div class="card__sub"><?php echo (int) $totalKubo; ?> total (<?php echo (int) $activeKubo; ?> active)</div>
   </div>
   <div class="card col-3">
     <div class="card__title">Ongoing Games</div>

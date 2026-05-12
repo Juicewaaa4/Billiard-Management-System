@@ -99,20 +99,21 @@ header('Content-Disposition: attachment; filename="' . $exportFilename . '"');
 echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
 echo '<head><meta charset="UTF-8"></head><body>';
 
-// Shift & time range info header
-if ($shiftLabel !== '' || $from || $to) {
-  echo '<table border="0" style="margin-bottom:8px;">';
-  if ($shiftLabel !== '') {
-    echo '<tr><td colspan="15" style="font-size:16px; font-weight:bold; color:#1e293b;">' . htmlspecialchars($shiftLabel) . '</td></tr>';
-  }
-  $fromDisplay = $from ? date('M j, Y g:i A', strtotime($from)) : '';
-  $toDisplay = $to ? date('M j, Y g:i A', strtotime($to)) : '';
-  if ($fromDisplay || $toDisplay) {
-    echo '<tr><td colspan="15" style="font-size:12px; color:#64748b;">Period: ' . htmlspecialchars($fromDisplay) . ' — ' . htmlspecialchars($toDisplay) . '</td></tr>';
-  }
-  echo '<tr><td colspan="15"></td></tr>';
-  echo '</table>';
+// Date & Time range info header (matches the reference format)
+$dateDisplay = $from ? date('m-d-y', strtotime($from)) : date('m-d-y');
+$timeFromDisplay = $from ? date('g:i A', strtotime($from)) : '';
+$timeToDisplay = $to ? date('g:i A', strtotime($to)) : '';
+
+echo '<table border="0" style="margin-bottom:8px;">';
+echo '<tr><td colspan="15" style="font-size:14px; font-weight:bold; color:#1e293b;">DATE: ' . $dateDisplay . '</td></tr>';
+if ($timeFromDisplay && $timeToDisplay) {
+  echo '<tr><td colspan="15" style="font-size:12px; font-weight:bold; color:#1e293b;">TIME: ' . $timeFromDisplay . ' - ' . $timeToDisplay . '</td></tr>';
 }
+if ($shiftLabel !== '') {
+  echo '<tr><td colspan="15" style="font-size:12px; color:#64748b;">' . htmlspecialchars($shiftLabel) . '</td></tr>';
+}
+echo '<tr><td colspan="15"></td></tr>';
+echo '</table>';
 
 $morningStart = '08:00';
 $eveningStart = '16:30';

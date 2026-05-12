@@ -48,8 +48,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       redirect('kubo.php');
     }
 
+    if ($action === 'start_karaoke') {
+      $tableId = (int)($_POST['table_id'] ?? 0);
+      $hours = (float)($_POST['hours'] ?? 0);
+      $payment = (float)($_POST['payment'] ?? 0);
+      $custName = trim((string)($_POST['customer_name'] ?? 'Walk-in'));
+
+      if ($tableId <= 0) throw new RuntimeException('Invalid Kubo.');
+      if ($hours <= 0) throw new RuntimeException('Please select number of hours.');
+
+      $tStmt = db()->prepare("SELECT rate_per_hour FROM tables WHERE id = ?");
+      $tStmt->execute([$tableId]);
+      $tRow = $tStmt->fetch();
+      $rate = $tRow ? (float)$tRow['rate_per_hour'] : 100.00;
+      if ($rate <= 0) $rate = 100.00;
+
+      $total = round($rate * $hours, 2);
+
+      if (round($payment, 2) < round($total, 2) - 0.01)
+        throw new RuntimeException('Payment not enough. Required: ₱' . number_format($total, 2));
+      $change = round($payment - $total, 2);
+
+      db()->beginTransaction();
+      $ins = db()->prepare("
+        INSERT INTO game_sessions
+          (table_id, walk_in_name, rate_per_hour, start_time, scheduled_end_time, hours_purchased, total_amount, duration_seconds, karaoke_included, created_by)
+        VALUES
+          (?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?, ?, ?, 1, ?)
+      ");
+      $ins->execute([
+        $tableId, $custName, $rate, (int)($hours * 3600), $hours, $total, (int)($hours * 3600), (int)current_user()['id']
+      ]);
+      $sessionId = (int)db()->lastInsertId();
+
+      db()->prepare("
+        INSERT INTO transactions (session_id, payment, change_amount, created_by)
+        VALUES (?, ?, ?, ?)
+      ")->execute([$sessionId, $payment, $change, (int)current_user()['id']]);
+
+      db()->commit();
+      flash_set('ok', 'Karaoke started (' . $hours . 'h).');
+      redirect('kubo.php');
+    }
+
+    if ($action === 'extend_karaoke') {
+      $sessionId = (int)($_POST['session_id'] ?? 0);
+      $hours = (float)($_POST['hours'] ?? 0);
+      $payment = (float)($_POST['payment'] ?? 0);
+
+      if ($sessionId <= 0) throw new RuntimeException('Invalid session.');
+      if ($hours <= 0) throw new RuntimeException('Please select hours to extend.');
+
+      $s = db()->prepare("SELECT gs.*, t.rate_per_hour AS t_rate FROM game_sessions gs JOIN tables t ON t.id=gs.table_id WHERE gs.id=? AND gs.end_time IS NULL LIMIT 1");
+      $s->execute([$sessionId]);
+      $session = $s->fetch();
+      if (!$session) throw new RuntimeException('Karaoke session not found or ended.');
+
+      $rate = (float)$session['t_rate'];
+      if ($rate <= 0) $rate = 100.00;
+      $cost = round($rate * $hours, 2);
+
+      if (round($payment, 2) < round($cost, 2) - 0.01)
+        throw new RuntimeException('Payment not enough. Required: ₱' . number_format($cost, 2));
+      $change = round($payment - $cost, 2);
+
+      db()->beginTransaction();
+      db()->prepare("
+        UPDATE game_sessions
+        SET scheduled_end_time = DATE_ADD(scheduled_end_time, INTERVAL ? SECOND),
+            hours_purchased = hours_purchased + ?,
+            total_amount = total_amount + ?,
+            duration_seconds = duration_seconds + ?
+        WHERE id = ?
+      ")->execute([(int)($hours * 3600), $hours, $cost, (int)($hours * 3600), $sessionId]);
+
+      db()->prepare("
+        INSERT INTO transactions (session_id, payment, change_amount, created_by)
+        VALUES (?, ?, ?, ?)
+      ")->execute([$sessionId, $payment, $change, (int)current_user()['id']]);
+
+      db()->commit();
+      flash_set('ok', 'Karaoke extended by ' . $hours . 'h.');
+      redirect('kubo.php');
+    }
+
+    if ($action === 'end_karaoke') {
+      $sessionId = (int)($_POST['session_id'] ?? 0);
+      if ($sessionId <= 0) throw new RuntimeException('Invalid session.');
+      db()->prepare("UPDATE game_sessions SET end_time = NOW() WHERE id = ?")->execute([$sessionId]);
+      flash_set('ok', 'Karaoke session ended.');
+      redirect('kubo.php');
+    }
+
     // Admin Actions
     if ($role === 'admin') {
+      if ($action === 'edit_kubo_settings') {
+        $id = (int)($_POST['id'] ?? 0);
+        $name = trim((string)($_POST['table_number'] ?? ''));
+        $rate = (float)($_POST['rate_per_hour'] ?? 100);
+        if ($name === '') throw new RuntimeException('Kubo name cannot be empty.');
+        db()->prepare("UPDATE tables SET table_number = ?, rate_per_hour = ? WHERE id = ?")->execute([$name, $rate, $id]);
+        flash_set('ok', 'Kubo settings saved.');
+        redirect('kubo.php');
+      }
+
       if ($action === 'add_kubo') {
         $name = trim((string)($_POST['table_number'] ?? ''));
         if ($name === '') throw new RuntimeException('Kubo name cannot be empty.');
@@ -100,11 +202,22 @@ if ($role === 'admin') {
 
 // GET active rentals for the cards (Only matters if viewing Today)
 $activeRentals = [];
+$activeKaraokes = [];
 if ($isToday) {
-  $activeStmt = db()->prepare("SELECT * FROM kubo_rentals WHERE rental_date = ? AND status = 'active'");
-  $activeStmt->execute([$selectedDate]);
+  $activeStmt = db()->prepare("SELECT * FROM kubo_rentals WHERE status = 'active'");
+  $activeStmt->execute();
   foreach ($activeStmt->fetchAll() as $r) {
     $activeRentals[(int)$r['table_id']] = $r;
+  }
+
+  $karaStmt = db()->query("
+    SELECT gs.*
+    FROM game_sessions gs
+    JOIN tables t ON t.id = gs.table_id
+    WHERE t.type = 'kubo' AND gs.end_time IS NULL
+  ");
+  foreach ($karaStmt->fetchAll(PDO::FETCH_ASSOC) as $k) {
+    $activeKaraokes[(int)$k['table_id']] = $k;
   }
 }
 
@@ -185,7 +298,10 @@ render_header('Kubo Rentals', 'kubo');
       $tid = (int)$k['id'];
       $isActive = isset($activeRentals[$tid]);
       $rental = $isActive ? $activeRentals[$tid] : null;
+      $karaoke = $activeKaraokes[$tid] ?? null;
       $isDisabled = !empty($k['is_disabled']);
+      $kRate = (float)($k['rate_per_hour'] ?? 100);
+      if ($kRate <= 0) $kRate = 100;
     ?>
       <div class="card table-card" style="border-left: 4px solid <?php echo $isDisabled ? '#6b7280' : ($isActive ? '#f59e0b' : '#22c55e'); ?>; position:relative; <?php echo $isDisabled ? 'opacity:0.6;' : ''; ?>">
         
@@ -218,7 +334,34 @@ render_header('Kubo Rentals', 'kubo');
             </div>
           </div>
 
-          <button class="btn btn--block" type="button" style="background:var(--bg); border:1px solid var(--danger); color:var(--danger);" onclick="openEndKubo(<?php echo (int)$rental['id']; ?>, '<?php echo h($k['table_number']); ?>')">End Rental</button>
+          <!-- Karaoke Section -->
+          <?php if ($karaoke): ?>
+            <div style="background:rgba(168, 85, 247, 0.05); border:1px solid rgba(168, 85, 247, 0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:12px; color:#c084fc; text-transform:uppercase; font-weight:700;">🎤 Karaoke Timer</span>
+                <span class="badge badge--warn" 
+                  data-countdown="<?php echo h($karaoke['scheduled_end_time']); ?>"
+                  data-session-id="<?php echo $karaoke['id']; ?>"
+                  data-table-name="<?php echo h($k['table_number']); ?>"
+                  data-player-name="<?php echo h($rental['customer_name']); ?>"
+                  data-rate="<?php echo $kRate; ?>"
+                  style="font-size:14px; font-weight:700; background:rgba(168, 85, 247, 0.15); color:#9333ea;"
+                >--:--:--</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px;">
+                <div>Hours: <strong><?php echo h(($karaoke['hours_purchased'] ?? 0) . 'h'); ?></strong></div>
+                <div>Paid: <strong>₱<?php echo number_format((float)($karaoke['total_amount'] ?? 0), 2); ?></strong></div>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn" type="button" style="flex:1; background:#c084fc; color:white; border:none; font-size:12px;" onclick="openExtendKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>', <?php echo $kRate; ?>)">Extend</button>
+                <button class="btn btn--ghost" type="button" style="width:100%; font-size:12px; color:var(--danger); background:var(--bg); border: 1px solid var(--border);" onclick="openEndKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>')">End</button>
+              </div>
+            </div>
+          <?php else: ?>
+            <button class="btn btn--block" type="button" style="background:var(--bg); border:1px dashed #c084fc; color:#c084fc; margin-bottom:12px;" onclick="openStartKaraoke(<?php echo $tid; ?>, '<?php echo h($k['table_number']); ?>', '<?php echo h(addslashes($rental['customer_name'])); ?>', <?php echo $kRate; ?>)">🎤 Add Karaoke (₱<?php echo number_format($kRate, 2); ?>/hr)</button>
+          <?php endif; ?>
+
+          <button class="btn btn--block" type="button" style="background:var(--bg); border:1px solid var(--danger); color:var(--danger);" onclick="openEndKubo(<?php echo (int)$rental['id']; ?>, '<?php echo h($k['table_number']); ?>')">End Kubo Rental</button>
 
         <?php elseif ($isDisabled): ?>
           <div style="text-align:center; padding:20px 0 8px;">
@@ -236,6 +379,23 @@ render_header('Kubo Rentals', 'kubo');
         <?php if ($role === 'admin'): ?>
           <details style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px;">
             <summary class="btn btn--ghost" style="font-size:12px; width:100%; text-align:center;">⚙️ Admin Settings</summary>
+
+            <div style="margin-top:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px dashed var(--border);">
+              <form method="post" class="form">
+                <input type="hidden" name="action" value="edit_kubo_settings">
+                <input type="hidden" name="id" value="<?php echo $tid; ?>">
+                <div class="field">
+                  <div class="label" style="font-size:11px;">Kubo Name</div>
+                  <input type="text" name="table_number" value="<?php echo h($k['table_number']); ?>" required style="font-size:12px; padding:6px;">
+                </div>
+                <div class="field" style="margin-bottom:8px;">
+                  <div class="label" style="font-size:11px;">Karaoke Rate (₱/hr)</div>
+                  <input type="number" step="0.01" min="0" name="rate_per_hour" value="<?php echo $kRate; ?>" required style="font-size:12px; padding:6px;">
+                </div>
+                <button type="submit" class="btn btn--ghost btn--block" style="font-size:12px; color:var(--text); background:var(--surface2);">Save Settings</button>
+              </form>
+            </div>
+
             <div style="display:flex; gap:8px; margin-top:10px;">
               <form method="post" onsubmit="return confirm('Change disabled status?');" style="flex:1;">
                 <input type="hidden" name="action" value="<?php echo $isDisabled ? 'enable_table' : 'disable_table'; ?>">
@@ -370,6 +530,116 @@ render_header('Kubo Rentals', 'kubo');
   </div>
 </div>
 
+<!-- ═══ Start Karaoke Modal ═══ -->
+<div id="startKaraokeModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='startKaraokeModal')document.getElementById('startKaraokeModal').style.display='none'">
+  <div class="global-modal__box" style="animation: modalIn 0.2s ease-out; max-width:400px;">
+    <div class="global-modal__header" style="background:#faf5ff; border-bottom:1px solid var(--border);">
+      <h3 style="color:#a855f7; margin:0;">🎤 Add Karaoke — <span id="skTableName"></span></h3>
+      <span class="global-modal__close" style="color:var(--muted);" onclick="document.getElementById('startKaraokeModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="start_karaoke">
+      <input type="hidden" name="table_id" id="skTableId" value="">
+      <input type="hidden" name="customer_name" id="skCustName" value="">
+      <input type="hidden" name="hours" id="skHoursInput" value="1">
+      
+      <div class="global-modal__body" style="text-align:left; padding:20px;">
+        <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:6px; text-transform:uppercase;">Select Hours (₱<span id="skRateDisplay">100.00</span>/hr)</label>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px;" id="skHourButtons">
+          <button type="button" class="btn btn--ghost sk-btn" data-hours="0.5">30 mins</button>
+          <button type="button" class="btn btn--ghost sk-btn is-active" data-hours="1">1 hr</button>
+          <button type="button" class="btn btn--ghost sk-btn" data-hours="2">2 hrs</button>
+          <button type="button" class="btn btn--ghost sk-btn" data-hours="3">3 hrs</button>
+          <button type="button" class="btn btn--ghost sk-btn" data-hours="4">4 hrs</button>
+          <button type="button" class="btn btn--ghost sk-btn" data-hours="5">5 hrs</button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface2); padding:10px; border-radius:8px; margin-bottom:16px;">
+          <span style="font-size:14px; color:var(--muted);">Total Cost:</span>
+          <span style="font-size:18px; font-weight:700; color:#22c55e;" id="skTotalCost">₱100.00</span>
+        </div>
+        
+        <div class="field" style="margin-bottom:20px;">
+          <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px; text-transform:uppercase;">Payment Amount (₱) *</label>
+          <input type="number" id="skPayment" name="payment" step="0.01" min="0" required style="width:100%; border:1px solid var(--border); background:rgba(0,0,0,0.2); color:var(--text); border-radius:8px; padding:10px; font-weight:700; font-size:16px;">
+          <div style="margin-top:6px; font-size:13px; text-align:right;">Change: <strong id="skChange" style="color:#22c55e;">₱0.00</strong></div>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('startKaraokeModal').style.display='none'">Cancel</button>
+          <button type="submit" class="btn" style="background:#a855f7; color:white;">Start Karaoke</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ Extend Karaoke Modal ═══ -->
+<div id="extendKaraokeModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='extendKaraokeModal')document.getElementById('extendKaraokeModal').style.display='none'">
+  <div class="global-modal__box" style="animation: modalIn 0.2s ease-out; max-width:400px;">
+    <div class="global-modal__header" style="background:#faf5ff; border-bottom:1px solid var(--border);">
+      <h3 style="color:#a855f7; margin:0;">⏱️ Extend Karaoke — <span id="ekTableName"></span></h3>
+      <span class="global-modal__close" style="color:var(--muted);" onclick="document.getElementById('extendKaraokeModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="extend_karaoke">
+      <input type="hidden" name="session_id" id="ekSessionId" value="">
+      <input type="hidden" name="hours" id="ekHoursInput" value="1">
+      
+      <div class="global-modal__body" style="text-align:left; padding:20px;">
+        <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:6px; text-transform:uppercase;">Add Hours (₱<span id="ekRateDisplay">100.00</span>/hr)</label>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px;" id="ekHourButtons">
+          <button type="button" class="btn btn--ghost ek-btn is-active" data-hours="0.5">30 mins</button>
+          <button type="button" class="btn btn--ghost ek-btn" data-hours="1">1 hr</button>
+          <button type="button" class="btn btn--ghost ek-btn" data-hours="2">2 hrs</button>
+          <button type="button" class="btn btn--ghost ek-btn" data-hours="3">3 hrs</button>
+          <button type="button" class="btn btn--ghost ek-btn" data-hours="4">4 hrs</button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface2); padding:10px; border-radius:8px; margin-bottom:16px;">
+          <span style="font-size:14px; color:var(--muted);">Extension Cost:</span>
+          <span style="font-size:18px; font-weight:700; color:#22c55e;" id="ekTotalCost">₱100.00</span>
+        </div>
+        
+        <div class="field" style="margin-bottom:20px;">
+          <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px; text-transform:uppercase;">Payment Amount (₱) *</label>
+          <input type="number" id="ekPayment" name="payment" step="0.01" min="0" required style="width:100%; border:1px solid var(--border); background:rgba(0,0,0,0.2); color:var(--text); border-radius:8px; padding:10px; font-weight:700; font-size:16px;">
+          <div style="margin-top:6px; font-size:13px; text-align:right;">Change: <strong id="ekChange" style="color:#22c55e;">₱0.00</strong></div>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('extendKaraokeModal').style.display='none'">Cancel</button>
+          <button type="submit" class="btn" style="background:#a855f7; color:white;">Extend Timer</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ End Karaoke Modal ═══ -->
+<div id="endKaraokeModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='endKaraokeModal')document.getElementById('endKaraokeModal').style.display='none'">
+  <div class="global-modal__box" style="animation: modalIn 0.2s ease-out; max-width:400px;">
+    <div class="global-modal__header" style="background:#faf5ff; border-bottom:1px solid var(--border);">
+      <h3 style="color:#a855f7; margin:0;">End <span id="ekEndTableName"></span> Karaoke</h3>
+      <span class="global-modal__close" style="color:var(--muted);" onclick="document.getElementById('endKaraokeModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="end_karaoke">
+      <input type="hidden" name="session_id" id="ekEndSessionId" value="">
+      
+      <div class="global-modal__body" style="text-align:center; padding:30px 20px;">
+        <div style="font-size:40px; margin-bottom:16px;">🎤🚫</div>
+        <p style="margin-bottom:24px; color:var(--muted);">Are you sure you want to end the Karaoke session for this Kubo?</p>
+        
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('endKaraokeModal').style.display='none'">Cancel</button>
+          <button type="submit" class="btn btn--danger">Confirm End Karaoke</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 function openStartKubo(tableId, tableName) {
   document.getElementById('startKuboId').value = tableId;
@@ -381,6 +651,122 @@ function openEndKubo(rentalId, tableName) {
   document.getElementById('endKuboDisplay').textContent = tableName;
   document.getElementById('endKuboModal').style.display='flex';
 }
+
+function openStartKaraoke(tableId, tableName, custName, rate) {
+  currentSkRate = rate;
+  document.getElementById('skTableId').value = tableId;
+  document.getElementById('skTableName').textContent = tableName;
+  document.getElementById('skCustName').value = custName;
+  document.getElementById('skRateDisplay').textContent = rate.toFixed(2);
+  updateSkTotal();
+  document.getElementById('startKaraokeModal').style.display='flex';
+}
+
+function openExtendKaraoke(sessionId, tableName, rate) {
+  currentEkRate = rate;
+  document.getElementById('ekSessionId').value = sessionId;
+  document.getElementById('ekTableName').textContent = tableName;
+  document.getElementById('ekRateDisplay').textContent = rate.toFixed(2);
+  updateEkTotal();
+  document.getElementById('extendKaraokeModal').style.display='flex';
+}
+
+function openEndKaraoke(sessionId, tableName) {
+  document.getElementById('ekEndSessionId').value = sessionId;
+  document.getElementById('ekEndTableName').textContent = tableName;
+  document.getElementById('endKaraokeModal').style.display='flex';
+}
+
+// Global modal overrides for Time's up
+function openEndModal(sessionId, tableName, type) {
+  openEndKaraoke(sessionId, tableName);
+}
+
+// Global modal overrides for Time's up
+function openExtendModal(sessionId, tableName, rate, scheduledEnd) {
+  openExtendKaraoke(sessionId, tableName, rate);
+}
+
+// Logic for Start Karaoke Modal
+let skHours = 1;
+let currentSkRate = 100;
+document.querySelectorAll('.sk-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.sk-btn').forEach(b => b.classList.remove('is-active', 'btn--primary'));
+    document.querySelectorAll('.sk-btn').forEach(b => {b.style.background=''; b.style.color='';});
+    
+    e.target.classList.add('is-active', 'btn--primary');
+    e.target.style.background = '#a855f7';
+    e.target.style.color = 'white';
+    
+    skHours = parseFloat(e.target.getAttribute('data-hours'));
+    document.getElementById('skHoursInput').value = skHours;
+    updateSkTotal();
+  });
+});
+document.getElementById('skPayment').addEventListener('input', updateSkTotal);
+function updateSkTotal() {
+  const total = skHours * currentSkRate;
+  document.getElementById('skTotalCost').textContent = '₱' + total.toFixed(2);
+  const pay = parseFloat(document.getElementById('skPayment').value) || 0;
+  const change = Math.max(0, pay - total);
+  document.getElementById('skChange').textContent = '₱' + change.toFixed(2);
+}
+
+// Logic for Extend Karaoke Modal
+let ekHours = 0.5;
+let currentEkRate = 100;
+document.querySelectorAll('.ek-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.ek-btn').forEach(b => b.classList.remove('is-active', 'btn--primary'));
+    document.querySelectorAll('.ek-btn').forEach(b => {b.style.background=''; b.style.color='';});
+    
+    e.target.classList.add('is-active', 'btn--primary');
+    e.target.style.background = '#a855f7';
+    e.target.style.color = 'white';
+    
+    ekHours = parseFloat(e.target.getAttribute('data-hours'));
+    document.getElementById('ekHoursInput').value = ekHours;
+    updateEkTotal();
+  });
+});
+document.getElementById('ekPayment').addEventListener('input', updateEkTotal);
+function updateEkTotal() {
+  const total = ekHours * currentEkRate;
+  document.getElementById('ekTotalCost').textContent = '₱' + total.toFixed(2);
+  const pay = parseFloat(document.getElementById('ekPayment').value) || 0;
+  const change = Math.max(0, pay - total);
+  document.getElementById('ekChange').textContent = '₱' + change.toFixed(2);
+}
+
+// Initialize active styles correctly
+const skActive = document.querySelector('.sk-btn.is-active');
+if (skActive) { skActive.style.background = '#a855f7'; skActive.style.color = 'white'; }
+const ekActive = document.querySelector('.ek-btn.is-active');
+if (ekActive) { ekActive.style.background = '#a855f7'; ekActive.style.color = 'white'; }
+
+// ── Countdown Timers ──
+document.querySelectorAll('[data-countdown]').forEach(el => {
+  const endTimeStr = el.dataset.countdown;
+  if (!endTimeStr) return;
+  // Replace dashes with slashes for broader browser support
+  const endTime = new Date(endTimeStr.replace(/-/g, '/'));
+  function tick() {
+    const now = new Date();
+    let diff = Math.floor((endTime - now) / 1000);
+    if (diff <= 0) {
+      el.textContent = "TIME'S UP";
+      el.className = 'badge badge--danger';
+      return;
+    }
+    const h = Math.floor(diff / 3600);
+    const m = Math.floor((diff % 3600) / 60);
+    const s = diff % 60;
+    el.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    setTimeout(tick, 1000);
+  }
+  tick();
+});
 </script>
 
 <style>
