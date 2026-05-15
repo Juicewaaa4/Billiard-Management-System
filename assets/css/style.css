@@ -549,6 +549,7 @@ select{
 
 /* ────────────────── RESPONSIVE ────────────────── */
 @media (max-width: 900px){
+  #mobileMenuBtn { display: block !important; }
   .sidebar{
     position:fixed;
     left:0;
@@ -556,7 +557,7 @@ select{
     transition:transform .25s cubic-bezier(.4,0,.2,1);
     z-index:50;
   }
-  .sidebar.is-open{transform:translateX(0)}
+  .sidebar.is-open{transform:translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,0.5);}
   .main{width:100%}
   .col-3{grid-column:span 6}
   .col-4{grid-column:span 6}

@@ -75,6 +75,7 @@ function render_header(string $title, string $activeNav = ''): void
 
       <main class="main">
         <header class="topbar">
+          <button id="mobileMenuBtn" style="display:none; background:transparent; border:none; font-size:24px; cursor:pointer; padding:0 10px 0 0;">☰</button>
           <div class="topbar__title"><?php echo h($title); ?></div>
           <div class="topbar__spacer"></div>
         </header>
@@ -177,6 +178,21 @@ function render_footer(): void
           setTimeout(() => el.remove(), 400);
         }, 3000);
       });
+
+      // Mobile menu toggle
+      const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+      const sidebar = document.querySelector('.sidebar');
+      if (mobileMenuBtn && sidebar) {
+        mobileMenuBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sidebar.classList.toggle('is-open');
+        });
+        document.addEventListener('click', (e) => {
+          if (window.innerWidth <= 900 && !sidebar.contains(e.target) && sidebar.classList.contains('is-open')) {
+            sidebar.classList.remove('is-open');
+          }
+        });
+      }
 
       // ── Global Timeout Poller ──
       let globalTimeUpAudioCtx = null;

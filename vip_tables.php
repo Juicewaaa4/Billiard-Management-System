@@ -134,6 +134,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rvRow = $rv->fetch();
         if ($rvRow) {
           $downPayment = (float)$rvRow['down_payment'];
+          if ($customerId === null && ($walkInName === '' || $walkInName === 'Walk-in')) {
+            $walkInName = trim((string)$rvRow['customer_name']);
+          }
         }
       }
 
@@ -539,7 +542,7 @@ render_header('VIP Table With Karaoke', 'vip_tables');
           <div style="background:var(--surface2); border-radius:8px; padding:12px; margin-bottom:12px;">
             <?php
               $customerId = !empty($active['customer_id']) ? (int)$active['customer_id'] : null;
-              $customerName = $customerId !== null ? ($customerNameById[$customerId] ?? ('Customer #' . $customerId)) : 'Walk-in';
+              $customerName = $customerId !== null ? ($customerNameById[$customerId] ?? ('Customer #' . $customerId)) : (!empty($active['walk_in_name']) ? $active['walk_in_name'] : 'Walk-in');
             ?>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <span style="font-size:12px; color:var(--muted); text-transform:uppercase;">Time Remaining</span>
@@ -723,7 +726,7 @@ render_header('VIP Table With Karaoke', 'vip_tables');
           <div style="background:var(--surface2); border-radius:8px; padding:12px; margin-bottom:12px;">
             <?php
               $customerId = !empty($active['customer_id']) ? (int)$active['customer_id'] : null;
-              $customerName = $customerId !== null ? ($customerNameById[$customerId] ?? ('Customer #' . $customerId)) : 'Walk-in';
+              $customerName = $customerId !== null ? ($customerNameById[$customerId] ?? ('Customer #' . $customerId)) : (!empty($active['walk_in_name']) ? $active['walk_in_name'] : 'Walk-in');
             ?>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <span style="font-size:12px; color:var(--muted); text-transform:uppercase;">Time Remaining</span>
