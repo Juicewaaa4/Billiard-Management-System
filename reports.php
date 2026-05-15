@@ -193,7 +193,57 @@ render_header('Reports', 'reports');
       </button>
     </div>
   </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="card__title">Gross Income Report (Weekly / Monthly)</div>
+        <div style="margin-top:6px;color:var(--muted);">Generate gross income per table formatted exactly as the ZOEY's Billiard House layout.</div>
+      </div>
+    </div>
+    <form method="get" action="exports/export_gross_income.php" target="_blank" class="row" style="margin-top:14px; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+      <div class="field" style="min-width:150px;">
+        <div class="label">From Date</div>
+        <input type="date" name="dt_from" id="giFrom" value="<?php echo date('Y-m-01'); ?>" required>
+      </div>
+      <div class="field" style="min-width:150px;">
+        <div class="label">To Date</div>
+        <input type="date" name="dt_to" id="giTo" value="<?php echo date('Y-m-t'); ?>" required>
+      </div>
+      <div class="field">
+        <button class="btn" type="button" onclick="setGIRange('month')" style="background:var(--surface2); color:var(--text); border:1px solid var(--border);">📅 This Month</button>
+        <button class="btn" type="button" onclick="setGIRange('week')" style="background:var(--surface2); color:var(--text); border:1px solid var(--border); margin-left:6px;">📅 This Week</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="field">
+        <button class="btn" type="submit" style="background:#548235; color:white; border:none; padding:10px 20px;">
+          📥 Export Gross Income
+        </button>
+      </div>
+    </form>
+  </div>
 </div>
+
+<script>
+function setGIRange(type) {
+  const d = new Date();
+  if (type === 'month') {
+    const y = d.getFullYear(), m = d.getMonth();
+    const firstDay = new Date(y, m, 1);
+    const lastDay = new Date(y, m + 1, 0);
+    document.getElementById('giFrom').value = firstDay.toISOString().split('T')[0];
+    document.getElementById('giTo').value = lastDay.toISOString().split('T')[0];
+  } else if (type === 'week') {
+    // Current week (Monday to Sunday)
+    const day = d.getDay() || 7; // Get current day number, converting Sun (0) to 7
+    if (day !== 1) d.setHours(-24 * (day - 1)); // Set to Monday
+    const firstDay = new Date(d);
+    const lastDay = new Date(d.getTime() + 6 * 24 * 60 * 60 * 1000); // Set to Sunday
+    document.getElementById('giFrom').value = firstDay.toISOString().split('T')[0];
+    document.getElementById('giTo').value = lastDay.toISOString().split('T')[0];
+  }
+}
+</script>
 
 <div class="grid" style="grid-template-columns: 1fr; gap:14px;">
   <div class="grid grid--cards">
