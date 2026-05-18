@@ -109,17 +109,65 @@ $toTs = strtotime($dtTo);
 $days = max(1, floor(($toTs - $fromTs) / 86400) + 1);
 $opSeconds = $opSecondsDaily * $days;
 
-$dtStmt = db()->prepare("
-    SELECT t.id, t.table_number, t.type,
-           COALESCE(SUM(gs.duration_seconds), 0) AS played_seconds
-    FROM tables t
-    LEFT JOIN game_sessions gs ON gs.table_id = t.id AND gs.is_voided = 0 AND DATE(gs.start_time) >= ? AND DATE(gs.start_time) <= ?
-    WHERE t.is_deleted = 0 AND t.type != 'kubo'
-    GROUP BY t.id, t.table_number, t.type
-    ORDER BY played_seconds ASC
-");
-$dtStmt->execute([$dtFrom, $dtTo]);
-$dtRows = $dtStmt->fetchAll();
+$daysList = [];
+$cur = $dtFrom;
+while (strtotime($cur) <= strtotime($dtTo)) {
+    $daysList[] = $cur;
+    $cur = date('Y-m-d', strtotime("$cur +1 day"));
+}
+
+$dtRows = db()->query("
+    SELECT id, table_number, type
+    FROM tables
+    WHERE is_deleted = 0 AND type != 'kubo'
+    ORDER BY CASE type WHEN 'regular' THEN 1 WHEN 'vip' THEN 2 WHEN 'ktv' THEN 3 END, table_number ASC
+")->fetchAll();
+
+foreach ($dtRows as &$r) {
+    $r['dead_seconds'] = 0;
+    foreach ($daysList as $day) {
+        $opStart = strtotime("$day $dtStart");
+        $opEnd = strtotime("$day $dtEnd");
+        if ($dtEnd === '00:00' || $dtEnd === '24:00') {
+            $opEnd = strtotime($day) + 86400;
+        } elseif ($opEnd <= $opStart) {
+            $opEnd += 86400;
+        }
+        
+        $wS = date('Y-m-d H:i:s', $opStart);
+        $wE = date('Y-m-d H:i:s', $opEnd);
+
+        $st = db()->prepare("
+            SELECT start_time, COALESCE(end_time, scheduled_end_time) AS eff_end
+            FROM game_sessions
+            WHERE table_id = ? AND is_voided = 0
+            AND start_time < ?
+            AND COALESCE(end_time, scheduled_end_time, '2099-12-31 23:59:59') > ?
+            ORDER BY start_time ASC
+        ");
+        $st->execute([$r['id'], $wE, $wS]);
+        $sessions = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        $cursor = $opStart;
+        foreach ($sessions as $sess) {
+            $ss = max(strtotime($sess['start_time']), $opStart);
+            $se = $sess['eff_end'] ? min(strtotime($sess['eff_end']), $opEnd) : $opEnd;
+            if ($ss > $cursor && ($ss - $cursor) >= 60) {
+                $r['dead_seconds'] += ($ss - $cursor);
+            }
+            $cursor = max($cursor, $se);
+        }
+        if ($cursor < $opEnd && ($opEnd - $cursor) >= 60) {
+            $r['dead_seconds'] += ($opEnd - $cursor);
+        }
+    }
+}
+unset($r);
+
+// Sort by highest dead time first
+usort($dtRows, function($a, $b) {
+    return $b['dead_seconds'] <=> $a['dead_seconds'];
+});
 
 // ── Fetch Voided Sessions ──
 $voidDate = parse_date((string)($_GET['void_date'] ?? date('Y-m-d')));
@@ -332,8 +380,8 @@ function exportGrossIncome(type) {
             <?php 
             $totP = 0; $totD = 0;
             foreach ($dtRows as $r): 
-               $playedSecs = (int)$r['played_seconds'];
-               $deadSecs = max(0, $opSeconds - $playedSecs);
+               $deadSecs = (int)$r['dead_seconds'];
+               $playedSecs = max(0, $opSeconds - $deadSecs);
                
                $totP += $playedSecs;
                $totD += $deadSecs;
