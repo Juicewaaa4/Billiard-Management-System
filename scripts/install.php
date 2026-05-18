@@ -138,7 +138,9 @@ try {
       status ENUM('active','completed') NOT NULL DEFAULT 'active',
       end_time DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      created_by INT DEFAULT NULL
+      created_by INT DEFAULT NULL,
+      is_voided TINYINT(1) NOT NULL DEFAULT 0,
+      void_reason VARCHAR(255) NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   ");
 
@@ -193,6 +195,8 @@ try {
     "ALTER TABLE game_sessions ADD COLUMN down_payment DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER reservation_id",
     "ALTER TABLE game_sessions ADD COLUMN is_voided TINYINT(1) NOT NULL DEFAULT 0 AFTER down_payment",
     "ALTER TABLE game_sessions ADD COLUMN void_reason VARCHAR(255) NULL AFTER is_voided",
+    "ALTER TABLE kubo_rentals ADD COLUMN is_voided TINYINT(1) NOT NULL DEFAULT 0 AFTER created_by",
+    "ALTER TABLE kubo_rentals ADD COLUMN void_reason VARCHAR(255) NULL AFTER is_voided",
   ];
 
   foreach ($migrations as $m) {

@@ -17,7 +17,7 @@ $activeTables = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='
 $availableTables = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='regular' AND status='available' AND is_deleted=0 AND is_disabled=0")->fetch()['c'];
 $ongoingGames = (int) db()->query("SELECT COUNT(*) AS c FROM game_sessions gs JOIN tables t ON gs.table_id = t.id WHERE gs.end_time IS NULL AND t.type='regular'")->fetch()['c'];
 
-$activeKubo = (int) db()->query("SELECT COUNT(DISTINCT kr.table_id) AS c FROM kubo_rentals kr JOIN tables t ON kr.table_id = t.id WHERE kr.status='active' AND t.type='kubo'")->fetch()['c'];
+$activeKubo = (int) db()->query("SELECT COUNT(DISTINCT kr.table_id) AS c FROM kubo_rentals kr JOIN tables t ON kr.table_id = t.id WHERE kr.status='active' AND kr.is_voided=0 AND t.type='kubo'")->fetch()['c'];
 $totalKubo = (int) db()->query("SELECT COUNT(*) AS c FROM tables WHERE type='kubo' AND is_deleted=0 AND is_disabled=0")->fetch()['c'];
 $availableKubo = max(0, $totalKubo - $activeKubo);
 
@@ -92,7 +92,7 @@ $chartStmt = db()->prepare("
     UNION ALL
     SELECT rental_date AS d, 'kubo' AS type, COALESCE(SUM(payment_amount),0) AS income
     FROM kubo_rentals
-    WHERE status = 'completed' AND rental_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
+    WHERE status = 'completed' AND is_voided = 0 AND rental_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
     GROUP BY rental_date
   ) combined
   GROUP BY d, type

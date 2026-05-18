@@ -40,7 +40,7 @@ $sessions = $gsStmt->fetchAll(PDO::FETCH_ASSOC);
 $krStmt = db()->prepare("
     SELECT table_id, end_time, payment_amount 
     FROM kubo_rentals 
-    WHERE end_time IS NOT NULL 
+    WHERE end_time IS NOT NULL AND is_voided = 0
       AND end_time >= ? AND end_time <= ?
 ");
 $krStmt->execute([$startBound, $endBound]);

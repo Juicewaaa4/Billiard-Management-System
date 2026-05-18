@@ -48,6 +48,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       redirect('kubo.php');
     }
 
+    if ($action === 'void_kubo') {
+      $rentalId = (int)($_POST['rental_id'] ?? 0);
+      $reason = trim((string)($_POST['void_reason'] ?? ''));
+      if ($rentalId <= 0) throw new RuntimeException('Invalid rental record.');
+      if ($reason === '') throw new RuntimeException('Void reason is required.');
+
+      // Mark as completed but set is_voided to 1
+      db()->prepare("UPDATE kubo_rentals SET status = 'completed', end_time = NOW(), is_voided = 1, void_reason = ? WHERE id = ? AND status = 'active'")->execute([$reason, $rentalId]);
+      flash_set('ok', 'Kubo rental voided successfully.');
+      redirect('kubo.php');
+    }
+
     if ($action === 'start_karaoke') {
       $tableId = (int)($_POST['table_id'] ?? 0);
       $hours = (float)($_POST['hours'] ?? 0);
@@ -140,6 +152,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       redirect('kubo.php');
     }
 
+    if ($action === 'void_karaoke') {
+      $sessionId = (int)($_POST['session_id'] ?? 0);
+      $reason = trim((string)($_POST['void_reason'] ?? ''));
+      if ($sessionId <= 0) throw new RuntimeException('Invalid session.');
+      if ($reason === '') throw new RuntimeException('Void reason is required.');
+      
+      db()->prepare("UPDATE game_sessions SET end_time = NOW(), is_voided = 1, void_reason = ? WHERE id = ?")->execute([$reason, $sessionId]);
+      flash_set('ok', 'Karaoke session voided successfully.');
+      redirect('kubo.php');
+    }
+
     // Admin Actions
     if ($role === 'admin') {
       if ($action === 'edit_kubo_settings') {
@@ -195,7 +218,7 @@ $isToday = ($selectedDate === date('Y-m-d'));
 // GET all income for selected date (Admin only)
 $totalIncome = 0;
 if ($role === 'admin') {
-  $stmt = db()->prepare("SELECT SUM(payment_amount) as total FROM kubo_rentals WHERE rental_date = ? AND (status = 'completed' || status = 'active')");
+  $stmt = db()->prepare("SELECT SUM(payment_amount) as total FROM kubo_rentals WHERE rental_date = ? AND is_voided = 0 AND (status = 'completed' || status = 'active')");
   $stmt->execute([$selectedDate]);
   $totalIncome = (float)($stmt->fetch()['total'] ?? 0);
 }
@@ -229,7 +252,7 @@ $txRows = [];
 if ($role === 'admin') {
   $sql = "
     SELECT
-      kr.id, kr.customer_name, kr.payment_amount, kr.rental_date, kr.status, kr.created_at, kr.end_time, t.table_number
+      kr.id, kr.customer_name, kr.payment_amount, kr.rental_date, kr.status, kr.created_at, kr.end_time, kr.is_voided, kr.void_reason, t.table_number
     FROM kubo_rentals kr
     JOIN tables t ON t.id = kr.table_id
     WHERE DATE(kr.rental_date) = ?
@@ -354,14 +377,20 @@ render_header('Kubo Rentals', 'kubo');
               </div>
               <div style="display:flex; gap:6px;">
                 <button class="btn" type="button" style="flex:1; background:#c084fc; color:white; border:none; font-size:12px;" onclick="openExtendKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>', <?php echo $kRate; ?>)">Extend</button>
-                <button class="btn btn--ghost" type="button" style="width:100%; font-size:12px; color:var(--danger); background:var(--bg); border: 1px solid var(--border);" onclick="openEndKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>')">End</button>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn btn--ghost" type="button" style="flex:1; font-size:12px; color:var(--danger); background:var(--bg); border: 1px solid var(--border);" onclick="openEndKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>')">End</button>
+                  <button class="btn btn--ghost" type="button" style="flex:1; font-size:12px; color:#fff; background:var(--danger); border: none;" onclick="openVoidKaraoke(<?php echo (int)$karaoke['id']; ?>, '<?php echo h($k['table_number']); ?>')">Void</button>
+                </div>
               </div>
             </div>
           <?php else: ?>
             <button class="btn btn--block" type="button" style="background:var(--bg); border:1px dashed #c084fc; color:#c084fc; margin-bottom:12px;" onclick="openStartKaraoke(<?php echo $tid; ?>, '<?php echo h($k['table_number']); ?>', '<?php echo h(addslashes($rental['customer_name'])); ?>', <?php echo $kRate; ?>)">🎤 Add Karaoke (₱<?php echo number_format($kRate, 2); ?>/hr)</button>
           <?php endif; ?>
 
-          <button class="btn btn--block" type="button" style="background:var(--bg); border:1px solid var(--danger); color:var(--danger);" onclick="openEndKubo(<?php echo (int)$rental['id']; ?>, '<?php echo h($k['table_number']); ?>')">End Kubo Rental</button>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button class="btn" type="button" style="flex:1; background:var(--bg); border:1px solid var(--danger); color:var(--danger);" onclick="openEndKubo(<?php echo (int)$rental['id']; ?>, '<?php echo h($k['table_number']); ?>')">End Kubo</button>
+            <button class="btn" type="button" style="flex:1; background:var(--danger); color:#fff; border:none;" onclick="openVoidKubo(<?php echo (int)$rental['id']; ?>, '<?php echo h($k['table_number']); ?>')">Void Kubo</button>
+          </div>
 
         <?php elseif ($isDisabled): ?>
           <div style="text-align:center; padding:20px 0 8px;">
@@ -460,7 +489,10 @@ render_header('Kubo Rentals', 'kubo');
               <td style="color:var(--muted);"><?php echo $tEnded; ?></td>
               <td style="font-weight:700; color:#22c55e;">₱<?php echo number_format((float)$r['payment_amount'], 2); ?></td>
               <td>
-                <?php if ($isTxActive): ?>
+                <?php if ((int)($r['is_voided'] ?? 0) === 1): ?>
+                  <span class="badge" style="background:#fef2f2; color:#ef4444; border:1px solid #fecaca; display:block; margin-bottom:4px;">VOIDED</span>
+                  <div style="font-size:11px; color:var(--muted); max-width:120px; word-wrap:break-word;"><?php echo h($r['void_reason'] ?? ''); ?></div>
+                <?php elseif ($isTxActive): ?>
                   <span class="badge badge--warn">Active</span>
                 <?php else: ?>
                   <span class="badge badge--ok">Completed</span>
@@ -524,6 +556,64 @@ render_header('Kubo Rentals', 'kubo');
         <div style="display:flex; gap:10px; justify-content:center;">
           <button type="button" class="btn btn--ghost" onclick="document.getElementById('endKuboModal').style.display='none'">Cancel</button>
           <button type="submit" class="btn btn--danger">Confirm End Rental</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ Void Kubo Modal ═══ -->
+<div id="voidKuboModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='voidKuboModal')document.getElementById('voidKuboModal').style.display='none'">
+  <div class="global-modal__box" style="animation: modalIn 0.2s ease-out;">
+    <div class="global-modal__header" style="border-bottom:none; padding-bottom:0;">
+      <h3 style="margin:0;"></h3>
+      <span class="global-modal__close" onclick="document.getElementById('voidKuboModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="void_kubo">
+      <input type="hidden" name="rental_id" id="voidKuboId" value="">
+      <div class="global-modal__body" style="text-align:center; padding-top:0;">
+        <div style="font-size:40px; margin-bottom:16px;">🗑️</div>
+        <h3 style="margin:0 0 8px; color:var(--text);">Void Kubo Rental <span id="voidKuboName" style="color:var(--danger);"></span></h3>
+        <p style="margin-bottom:16px; color:var(--muted); font-size:13px;">This will cancel the rent and restore the table. This action will not be counted in the sales report.</p>
+        
+        <div style="text-align:left; margin-bottom:24px;">
+            <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:6px; text-transform:uppercase;">Reason for Voiding *</label>
+            <input type="text" name="void_reason" required placeholder="e.g. Test, Wrong Entry, Customer Cancelled" style="width:100%; border:1px solid var(--border); background:var(--surface2); color:var(--text); border-radius:8px; padding:10px; font-size:14px;">
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('voidKuboModal').style.display='none'">Cancel</button>
+          <button type="submit" class="btn btn--danger">Void Rental</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ Void Karaoke Modal ═══ -->
+<div id="voidKaraokeModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='voidKaraokeModal')document.getElementById('voidKaraokeModal').style.display='none'">
+  <div class="global-modal__box" style="animation: modalIn 0.2s ease-out;">
+    <div class="global-modal__header" style="border-bottom:none; padding-bottom:0;">
+      <h3 style="margin:0;"></h3>
+      <span class="global-modal__close" onclick="document.getElementById('voidKaraokeModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="void_karaoke">
+      <input type="hidden" name="session_id" id="voidKaraokeId" value="">
+      <div class="global-modal__body" style="text-align:center; padding-top:0;">
+        <div style="font-size:40px; margin-bottom:16px;">🗑️</div>
+        <h3 style="margin:0 0 8px; color:var(--text);">Void Karaoke <span id="voidKaraokeName" style="color:var(--danger);"></span></h3>
+        <p style="margin-bottom:16px; color:var(--muted); font-size:13px;">This will cancel the karaoke session. This action will not be counted in the sales report.</p>
+        
+        <div style="text-align:left; margin-bottom:24px;">
+            <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:6px; text-transform:uppercase;">Reason for Voiding *</label>
+            <input type="text" name="void_reason" required placeholder="e.g. Mic broken, Customer changed mind" style="width:100%; border:1px solid var(--border); background:var(--surface2); color:var(--text); border-radius:8px; padding:10px; font-size:14px;">
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('voidKaraokeModal').style.display='none'">Cancel</button>
+          <button type="submit" class="btn btn--danger">Void Karaoke</button>
         </div>
       </div>
     </form>
@@ -651,6 +741,11 @@ function openEndKubo(rentalId, tableName) {
   document.getElementById('endKuboDisplay').textContent = tableName;
   document.getElementById('endKuboModal').style.display='flex';
 }
+function openVoidKubo(rentalId, tableName) {
+  document.getElementById('voidKuboId').value = rentalId;
+  document.getElementById('voidKuboName').textContent = tableName;
+  document.getElementById('voidKuboModal').style.display='flex';
+}
 
 function openStartKaraoke(tableId, tableName, custName, rate) {
   currentSkRate = rate;
@@ -675,6 +770,11 @@ function openEndKaraoke(sessionId, tableName) {
   document.getElementById('ekEndSessionId').value = sessionId;
   document.getElementById('ekEndTableName').textContent = tableName;
   document.getElementById('endKaraokeModal').style.display='flex';
+}
+function openVoidKaraoke(sessionId, tableName) {
+  document.getElementById('voidKaraokeId').value = sessionId;
+  document.getElementById('voidKaraokeName').textContent = tableName;
+  document.getElementById('voidKaraokeModal').style.display='flex';
 }
 
 // Global modal overrides for Time's up

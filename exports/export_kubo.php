@@ -11,7 +11,7 @@ require_role(['admin']); // Restricted to Admin only
 $from = parse_date((string)($_GET['from'] ?? date('Y-m-d')));
 $to = parse_date((string)($_GET['to'] ?? date('Y-m-d')));
 
-$where = ["1=1"];
+$where = ["kr.is_voided = 0"];
 $params = [];
 
 if ($from) { $where[] = "DATE(kr.rental_date) >= ?"; $params[] = $from; }
@@ -28,7 +28,7 @@ $stmt = db()->prepare("
 $stmt->execute($params);
 $rentals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$whereKaraoke = ["t.type = 'kubo'"];
+$whereKaraoke = ["t.type = 'kubo'", "gs.is_voided = 0"];
 $paramsKaraoke = [];
 
 if ($from) { $whereKaraoke[] = "DATE(gs.start_time) >= ?"; $paramsKaraoke[] = $from; }

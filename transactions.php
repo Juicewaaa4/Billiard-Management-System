@@ -57,7 +57,7 @@ $stmt->execute($params);
 $gameRows = $stmt->fetchAll();
 
 // Also fetch Kubo rentals
-$kuboWhere = ["kr.status = 'completed'"];
+$kuboWhere = ["kr.status = 'completed'", "kr.is_voided = 0"];
 $kuboParams = [];
 if ($from) { $kuboWhere[] = "DATE(kr.end_time) >= ?"; $kuboParams[] = $from; }
 if ($to) { $kuboWhere[] = "DATE(kr.end_time) <= ?"; $kuboParams[] = $to; }
@@ -80,7 +80,9 @@ $kuboSql = "
     0 AS change_amount,
     kr.end_time AS paid_at,
     0 AS loyalty_hours,
-    0 AS karaoke_included
+    0 AS karaoke_included,
+    kr.is_voided,
+    kr.void_reason
   FROM kubo_rentals kr
   JOIN tables t ON t.id = kr.table_id
   WHERE " . implode(' AND ', $kuboWhere) . "
