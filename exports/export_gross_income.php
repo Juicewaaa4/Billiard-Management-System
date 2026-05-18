@@ -10,6 +10,7 @@ require_role(['admin']);
 
 $dtFromStr = (string)($_GET['dt_from'] ?? date('Y-m-01'));
 $dtToStr   = (string)($_GET['dt_to'] ?? date('Y-m-t'));
+$reportType = (string)($_GET['type'] ?? 'monthly'); // 'weekly' or 'monthly'
 
 $dtFrom = parse_date($dtFromStr);
 $dtTo   = parse_date($dtToStr);
@@ -18,214 +19,263 @@ if (!$dtFrom || !$dtTo) {
     die("Invalid date range");
 }
 
-// Fetch all tables
-$tablesStmt = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted = 0 ORDER BY type DESC, id ASC");
-$tables = $tablesStmt->fetchAll(PDO::FETCH_ASSOC);
+// Fetch all non-kubo tables (regular, vip, ktv) ordered nicely
+$regularTables = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted = 0 AND type IN ('regular','vip','ktv') ORDER BY CASE type WHEN 'regular' THEN 1 WHEN 'vip' THEN 2 WHEN 'ktv' THEN 3 END, id ASC")->fetchAll(PDO::FETCH_ASSOC);
 
-// We need to fetch all game_sessions and kubo_rentals in this date range
+// Fetch kubo tables for STORE column
+$kuboTables = db()->query("SELECT id FROM tables WHERE is_deleted = 0 AND type = 'kubo'")->fetchAll(PDO::FETCH_ASSOC);
+$kuboIds = array_column($kuboTables, 'id');
+
+// Date bounds
 $startBound = $dtFrom . ' 00:00:00';
 $endBound   = $dtTo . ' 23:59:59';
 
-// Fetch Game Sessions (Regular, VIP, KTV/Kubo Karaoke)
+// Fetch all game sessions (regular, vip, ktv, and kubo karaoke) in range
 $gsStmt = db()->prepare("
-    SELECT table_id, end_time, total_amount 
-    FROM game_sessions 
-    WHERE is_voided = 0 AND end_time IS NOT NULL 
-      AND end_time >= ? AND end_time <= ?
+    SELECT table_id, end_time, total_amount, t.type AS table_type
+    FROM game_sessions gs
+    JOIN tables t ON t.id = gs.table_id
+    WHERE gs.is_voided = 0 AND gs.end_time IS NOT NULL
+      AND gs.end_time >= ? AND gs.end_time <= ?
 ");
 $gsStmt->execute([$startBound, $endBound]);
 $sessions = $gsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch Kubo Rentals (Kubo)
+// Fetch kubo rentals (STORE income)
 $krStmt = db()->prepare("
-    SELECT table_id, end_time, payment_amount 
-    FROM kubo_rentals 
-    WHERE end_time IS NOT NULL AND is_voided = 0
+    SELECT table_id, end_time, payment_amount
+    FROM kubo_rentals
+    WHERE is_voided = 0 AND end_time IS NOT NULL
       AND end_time >= ? AND end_time <= ?
 ");
 $krStmt->execute([$startBound, $endBound]);
-$rentals = $krStmt->fetchAll(PDO::FETCH_ASSOC);
+$kuboRentals = $krStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Group data by business date and table
-$incomeData = [];
+// Build date list
 $dates = [];
 $currentTs = strtotime($dtFrom);
-$endTsObj = strtotime($dtTo);
-
-while ($currentTs <= $endTsObj) {
-    $d = date('Y-m-d', $currentTs);
-    $dates[] = $d;
-    $incomeData[$d] = [];
-    foreach ($tables as $t) {
-        $incomeData[$d][$t['id']] = 0.0;
-    }
-    $currentTs += 86400; // +1 day
+$endTs = strtotime($dtTo);
+while ($currentTs <= $endTs) {
+    $dates[] = date('Y-m-d', $currentTs);
+    $currentTs += 86400;
 }
 
-// Process sessions
+// Initialize income data arrays per date
+$incomeByDate = [];    // [date][table_id] = amount
+$storeByDate  = [];    // [date] = kubo total
+foreach ($dates as $d) {
+    $incomeByDate[$d] = [];
+    $storeByDate[$d] = 0.0;
+    foreach ($regularTables as $t) {
+        $incomeByDate[$d][$t['id']] = 0.0;
+    }
+}
+
+// Process game sessions
 foreach ($sessions as $s) {
-    $bDate = date('Y-m-d', strtotime($s['end_time']));
-    if (isset($incomeData[$bDate][$s['table_id']])) {
-        $incomeData[$bDate][$s['table_id']] += (float)$s['total_amount'];
+    $d = date('Y-m-d', strtotime($s['end_time']));
+    if (!isset($incomeByDate[$d])) continue;
+    $tid = (int)$s['table_id'];
+    if (in_array($tid, $kuboIds)) {
+        // Kubo karaoke → STORE
+        $storeByDate[$d] += (float)$s['total_amount'];
+    } elseif (isset($incomeByDate[$d][$tid])) {
+        $incomeByDate[$d][$tid] += (float)$s['total_amount'];
     }
 }
 
-// Process kubo rentals
-foreach ($rentals as $r) {
-    $bDate = date('Y-m-d', strtotime($r['end_time']));
-    if (isset($incomeData[$bDate][$r['table_id']])) {
-        $incomeData[$bDate][$r['table_id']] += (float)$r['payment_amount'];
+// Process kubo rentals → STORE
+foreach ($kuboRentals as $r) {
+    $d = date('Y-m-d', strtotime($r['end_time']));
+    if (isset($storeByDate[$d])) {
+        $storeByDate[$d] += (float)$r['payment_amount'];
     }
 }
 
-$exportTitle = "Gross_Income_Report_{$dtFrom}_to_{$dtTo}.xls";
+// Title
+if ($reportType === 'weekly') {
+    $titleLine = 'FOR THE WEEK OF ' . strtoupper(date('M d', strtotime($dtFrom))) . ' - ' . strtoupper(date('M d, Y', strtotime($dtTo)));
+    $fileTitle = 'Weekly_Gross_Income_' . $dtFrom . '_to_' . $dtTo . '.xls';
+} else {
+    if ($dtFrom === date('Y-m-01', strtotime($dtFrom)) && $dtTo === date('Y-m-t', strtotime($dtFrom))) {
+        $titleLine = 'FOR THE MONTH OF ' . strtoupper(date('F Y', strtotime($dtFrom)));
+    } else {
+        $titleLine = 'FOR THE PERIOD OF ' . strtoupper(date('M d', strtotime($dtFrom))) . ' - ' . strtoupper(date('M d, Y', strtotime($dtTo)));
+    }
+    $fileTitle = 'Monthly_Gross_Income_' . date('Y_m', strtotime($dtFrom)) . '.xls';
+}
+
+// Total columns = DATE(1) + STORE(1) + regularTables + TOTAL(1)
+$tableCols = count($regularTables);
+$totalCols = 1 + 1 + $tableCols + 1; // DATE + STORE + tables + TOTAL
 
 header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
-header('Content-Disposition: attachment; filename="' . $exportTitle . '"');
-header("Pragma: no-cache");
-header("Expires: 0");
+header('Content-Disposition: attachment; filename="' . $fileTitle . '"');
+header('Pragma: no-cache');
+header('Expires: 0');
 
-$titleMonth = date('F Y', strtotime($dtFrom));
-if (date('m', strtotime($dtFrom)) !== date('m', strtotime($dtTo))) {
-    $titleMonth = date('F d, Y', strtotime($dtFrom)) . ' - ' . date('F d, Y', strtotime($dtTo));
-} else if ($dtFrom !== date('Y-m-01', strtotime($dtFrom)) || $dtTo !== date('Y-m-t', strtotime($dtTo))) {
-    $titleMonth = date('F d, Y', strtotime($dtFrom)) . ' to ' . date('F d, Y', strtotime($dtTo));
-} else {
-    $titleMonth = "THE MONTH OF " . strtoupper(date('F Y', strtotime($dtFrom)));
-}
+?>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="UTF-8">
+<style>
+  body { font-family: Calibri, Arial, sans-serif; font-size: 11px; }
+  table { border-collapse: collapse; }
+  .title-line { font-size: 11px; font-weight: normal; }
+  .hdr-billiards {
+    background-color: #548235; color: white; font-weight: bold;
+    text-align: center; border: 1px solid #000; vertical-align: middle;
+  }
+  .hdr-date {
+    background-color: #548235; color: white; font-weight: bold;
+    text-align: center; border: 1px solid #000; vertical-align: middle;
+  }
+  .hdr-store {
+    background-color: #548235; color: white; font-weight: bold;
+    text-align: center; border: 1px solid #000; vertical-align: middle;
+  }
+  .hdr-total {
+    background-color: #548235; color: white; font-weight: bold;
+    text-align: center; border: 1px solid #000; vertical-align: middle;
+  }
+  .hdr-table {
+    background-color: #70AD47; color: white; font-weight: bold;
+    text-align: center; border: 1px solid #000;
+  }
+  .cell-date { text-align: left; border: 1px solid #ccc; padding: 2px 6px; }
+  .cell-store { text-align: right; border: 1px solid #ccc; padding: 2px 4px; }
+  .cell-amt  { text-align: right; border: 1px solid #ccc; padding: 2px 4px; }
+  .cell-zero { text-align: right; border: 1px solid #ccc; padding: 2px 4px; color: #333; }
+  .cell-rowtotal { text-align: right; border: 1px solid #ccc; padding: 2px 4px; font-weight: bold; }
+  .row-total-row { background-color: #FFC000; font-weight: bold; }
+  .row-total-row td { border: 1px solid #000; padding: 2px 4px; }
+  .week-sep td { height: 6px; border: none; background-color: transparent; }
+  .sign-label { font-weight: bold; text-align: center; }
+  .sign-name  { font-weight: bold; text-align: center; text-decoration: underline; }
+  .sign-pos   { text-align: center; font-style: italic; }
+</style>
+</head>
+<body>
+<table border="0" cellpadding="2" cellspacing="0">
 
-echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
-echo '<head><meta charset="UTF-8">';
-echo '<style>
-    .hdr-main { text-align: right; font-size: 16px; font-weight: bold; }
-    .hdr-sub { text-align: left; font-size: 12px; }
-    .table-hdr { background-color: #548235; color: white; font-weight: bold; text-align: center; border: 1px solid #000; vertical-align: middle; }
-    .cell-date { text-align: left; border: 1px solid #000; }
-    .cell-amt { text-align: right; border: 1px solid #000; }
-    .cell-amt-zero { text-align: right; border: 1px solid #000; color: #555; }
-    .row-total { background-color: #FFC000; font-weight: bold; }
-    .row-total td { border: 1px solid #000; }
-    .sign-title { font-weight: bold; text-align: center; }
-    .sign-name { font-weight: bold; text-align: center; text-decoration: underline; }
-    .sign-pos { text-align: center; font-style: italic; }
-</style>';
-echo '</head><body>';
+  <?php /* ── Title Row ── */ ?>
+  <tr>
+    <td colspan="<?= $totalCols ?>" class="title-line"><?= htmlspecialchars($titleLine) ?></td>
+  </tr>
+  <tr><td colspan="<?= $totalCols ?>"></td></tr>
 
-$colCount = count($tables) + 2; // Date + Tables + Total
+  <?php /* ── Header Row 1: DATE | STORE | BILLIARDS (spanning) | TOTAL ── */ ?>
+  <tr>
+    <td rowspan="2" class="hdr-date" style="width:90px;">DATE</td>
+    <td rowspan="2" class="hdr-store" style="width:90px;">STORE</td>
+    <td colspan="<?= $tableCols ?>" class="hdr-billiards">BILLIARDS</td>
+    <td rowspan="2" class="hdr-total" style="width:110px;">TOTAL</td>
+  </tr>
 
-echo '<table border="0" cellpadding="3" cellspacing="0" style="font-family: Calibri, sans-serif; font-size: 11px;">';
+  <?php /* ── Header Row 2: individual table names ── */ ?>
+  <tr>
+    <?php foreach ($regularTables as $t): ?>
+      <td class="hdr-table" style="width:88px;"><?= htmlspecialchars(strtoupper($t['table_number'])) ?></td>
+    <?php endforeach; ?>
+  </tr>
 
-// Header row 1
-echo '<tr>';
-echo '<td colspan="' . $colCount . '" class="hdr-main">ZOEY\'S BILLIARD HOUSE GROSS INCOME PER TABLE REPORT</td>';
-echo '</tr>';
+  <?php
+  // Track grand totals
+  $grandStore = 0.0;
+  $grandCols  = array_fill(0, $tableCols, 0.0);
+  $grandTotal = 0.0;
 
-// Header row 2
-echo '<tr>';
-echo '<td colspan="' . $colCount . '" class="hdr-sub">FOR ' . $titleMonth . '</td>';
-echo '</tr>';
+  // Group dates by week (Mon–Sun)
+  $weeks = [];
+  $weekIdx = 0;
+  foreach ($dates as $d) {
+    $dow = (int)date('N', strtotime($d)); // 1=Mon, 7=Sun
+    $weeks[$weekIdx][] = $d;
+    if ($dow === 7) $weekIdx++;          // end of week → new group
+  }
+  $isFirst = true;
+  foreach ($weeks as $wIdx => $weekDates):
+    if (!$isFirst): ?>
+      <?php /* blank separator row between weeks */ ?>
+      <tr class="week-sep"><td colspan="<?= $totalCols ?>"></td></tr>
+    <?php endif; $isFirst = false;
+    $isFirstRowOfWeek = true;
+    foreach ($weekDates as $d):
+      $store    = $storeByDate[$d];
+      $rowTotal = $store;
+      $colAmts  = [];
+      foreach ($regularTables as $t) {
+          $a = $incomeByDate[$d][$t['id']];
+          $colAmts[] = $a;
+          $rowTotal += $a;
+      }
+      $grandStore += $store;
+      $grandTotal += $rowTotal;
+      foreach ($colAmts as $ci => $a) $grandCols[$ci] += $a;
+      ?>
+      <tr>
+        <td class="cell-date"><?= date('d-M-y', strtotime($d)) ?></td>
 
-echo '<tr><td colspan="' . $colCount . '"></td></tr>'; // Spacer
+        <?php /* STORE cell — show ₱ prefix on first row of each week */ ?>
+        <?php if ($isFirstRowOfWeek): ?>
+          <td class="cell-store" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'">
+            <?php if ($store > 0): ?>&#8369;&nbsp;<?= number_format($store, 2) ?><?php else: ?>&#8369;&nbsp;<?= number_format(0, 2) ?><?php endif; ?>
+          </td>
+        <?php else: ?>
+          <td class="cell-<?= $store > 0 ? 'amt' : 'zero' ?>" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($store, 2) ?></td>
+        <?php endif; ?>
 
-// Table Headers
-echo '<tr>';
-echo '<td rowspan="2" class="table-hdr" style="width:100px;">DATE</td>';
-echo '<td colspan="' . count($tables) . '" class="table-hdr">BILLIARDS</td>';
-echo '<td rowspan="2" class="table-hdr" style="width:120px;">TOTAL</td>';
-echo '</tr>';
+        <?php foreach ($colAmts as $ci => $a): ?>
+          <?php if ($isFirstRowOfWeek): ?>
+            <td class="cell-amt" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'">
+              <?php if ($a > 0): ?>&#8369;&nbsp;<?= number_format($a, 2) ?><?php else: ?>&#8369;&nbsp;<?= number_format(0, 2) ?><?php endif; ?>
+            </td>
+          <?php else: ?>
+            <td class="cell-<?= $a > 0 ? 'amt' : 'zero' ?>" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($a, 2) ?></td>
+          <?php endif; ?>
+        <?php endforeach; ?>
 
-echo '<tr>';
-foreach ($tables as $t) {
-    // Format name (e.g. "Table 1" -> "TABLE 1")
-    $name = strtoupper($t['table_number']);
-    echo '<td class="table-hdr" style="background-color: #70AD47; width:90px;">' . htmlspecialchars($name) . '</td>';
-}
-echo '</tr>';
+        <?php /* Row Total */ ?>
+        <td class="cell-rowtotal" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($rowTotal, 2) ?></td>
+      </tr>
+      <?php $isFirstRowOfWeek = false;
+    endforeach;
+  endforeach; ?>
 
-$grandTotals = array_fill(0, count($tables), 0.0);
-$superGrandTotal = 0.0;
+  <?php /* ── Grand Total Row ── */ ?>
+  <tr class="row-total-row">
+    <td style="text-align:center; font-weight:bold;">TOTAL</td>
+    <td style="text-align:right; mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($grandStore, 2) ?></td>
+    <?php foreach ($grandCols as $gc): ?>
+      <td style="text-align:right; mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($gc, 2) ?></td>
+    <?php endforeach; ?>
+    <td style="text-align:right; mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($grandTotal, 2) ?></td>
+  </tr>
 
-foreach ($dates as $d) {
-    $rowTotal = 0.0;
-    
-    // Grouping by week logic for border (optional, but let's just make regular rows)
-    $dayNum = (int)date('N', strtotime($d)); // 1 (Mon) - 7 (Sun)
-    $rowStyle = ($dayNum === 7) ? 'border-bottom: 2px solid #000;' : ''; // Thicker border end of week
-    
-    echo '<tr style="' . $rowStyle . '">';
-    // Date column (e.g., 01-Apr-26)
-    echo '<td class="cell-date">' . date('d-M-y', strtotime($d)) . '</td>';
-    
-    // Tables columns
-    $i = 0;
-    foreach ($tables as $t) {
-        $amt = $incomeData[$d][$t['id']];
-        $grandTotals[$i] += $amt;
-        $rowTotal += $amt;
-        
-        if ($amt > 0) {
-            echo '<td class="cell-amt" style="mso-number-format:\'\[$₱\]\\ \#\,\#\#0\.00\'">' . number_format($amt, 2, '.', '') . '</td>';
-        } else {
-            echo '<td class="cell-amt-zero" style="text-align:right;"> - </td>';
-        }
-        $i++;
-    }
-    
-    $superGrandTotal += $rowTotal;
-    
-    // Row Total
-    if ($rowTotal > 0) {
-        echo '<td class="cell-amt row-total" style="mso-number-format:\'\[$₱\]\\ \#\,\#\#0\.00\'">' . number_format($rowTotal, 2, '.', '') . '</td>';
-    } else {
-        echo '<td class="cell-amt-zero row-total" style="text-align:right;"> - </td>';
-    }
-    
-    echo '</tr>';
-}
+</table>
 
-// Final Grand Total Row
-echo '<tr class="row-total">';
-echo '<td style="text-align:center;">TOTAL</td>';
-for ($i = 0; $i < count($tables); $i++) {
-    $amt = $grandTotals[$i];
-    if ($amt > 0) {
-        echo '<td class="cell-amt" style="mso-number-format:\'\[$₱\]\\ \#\,\#\#0\.00\'">' . number_format($amt, 2, '.', '') . '</td>';
-    } else {
-        echo '<td class="cell-amt-zero" style="text-align:right;"> - </td>';
-    }
-}
-// Super Grand Total
-echo '<td class="cell-amt" style="mso-number-format:\'\[$₱\]\\ \#\,\#\#0\.00\'">' . number_format($superGrandTotal, 2, '.', '') . '</td>';
-echo '</tr>';
+<?php /* ── Signatures ── */ ?>
+<br><br><br>
+<table border="0" cellpadding="3" cellspacing="0" style="font-family:Calibri,sans-serif; font-size:11px; min-width:700px;">
+  <tr>
+    <td width="60"></td>
+    <td colspan="3" class="sign-label">PREPARED BY:</td>
+    <td width="80"></td>
+    <td colspan="3" class="sign-label">CHECKED &amp; NOTED BY:</td>
+  </tr>
+  <tr><td colspan="8" style="height:36px;"></td></tr>
+  <tr>
+    <td width="60"></td>
+    <td colspan="3" class="sign-name">TRECIA E. DE JESUS</td>
+    <td width="80"></td>
+    <td colspan="3" class="sign-name">ENRIQUE DM. MARTINEZ</td>
+  </tr>
+  <tr>
+    <td width="60"></td>
+    <td colspan="3" class="sign-pos">Manager</td>
+    <td width="80"></td>
+    <td colspan="3" class="sign-pos">Owner</td>
+  </tr>
+</table>
 
-echo '</table>';
-
-// Signatures
-echo '<br><br><br>';
-echo '<table border="0" style="font-family: Calibri, sans-serif; font-size: 11px;">';
-echo '<tr>';
-echo '<td colspan="3"></td>';
-echo '<td colspan="3" class="sign-title">PREPARED BY:</td>';
-echo '<td colspan="' . max(1, count($tables) - 6) . '"></td>';
-echo '<td colspan="3" class="sign-title">CHECKED & NOTED BY:</td>';
-echo '</tr>';
-echo '<tr><td colspan="' . $colCount . '" style="height:40px;"></td></tr>'; // Space for signature
-
-echo '<tr>';
-echo '<td colspan="3"></td>';
-echo '<td colspan="3" class="sign-name">TRECIA E. DE JESUS</td>';
-echo '<td colspan="' . max(1, count($tables) - 6) . '"></td>';
-echo '<td colspan="3" class="sign-name">ENRIQUE DM. MARTINEZ</td>';
-echo '</tr>';
-
-echo '<tr>';
-echo '<td colspan="3"></td>';
-echo '<td colspan="3" class="sign-pos">Manager</td>';
-echo '<td colspan="' . max(1, count($tables) - 6) . '"></td>';
-echo '<td colspan="3" class="sign-pos">Owner</td>';
-echo '</tr>';
-
-echo '</table>';
-
-echo '</body></html>';
-exit;
+</body>
+</html>

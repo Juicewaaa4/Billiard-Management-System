@@ -195,53 +195,99 @@ render_header('Reports', 'reports');
   </div>
 
   <div class="card">
-    <div class="row">
+    <div class="row" style="align-items:center; flex-wrap:wrap; gap:10px;">
       <div>
-        <div class="card__title">Gross Income Report (Weekly / Monthly)</div>
-        <div style="margin-top:6px;color:var(--muted);">Generate gross income per table formatted exactly as the ZOEY's Billiard House layout.</div>
+        <div class="card__title">Gross Income Report</div>
+        <div style="margin-top:6px;color:var(--muted);">Generate weekly or monthly gross income per table in exact ZOEY's Billiard House format.</div>
       </div>
     </div>
-    <form method="get" action="exports/export_gross_income.php" target="_blank" class="row" style="margin-top:14px; gap:10px; align-items:flex-end; flex-wrap:wrap;">
-      <div class="field" style="min-width:150px;">
-        <div class="label">From Date</div>
-        <input type="date" name="dt_from" id="giFrom" value="<?php echo date('Y-m-01'); ?>" required>
+
+    <!-- Weekly Export -->
+    <div style="margin-top:14px; padding:14px; background:var(--surface2); border-radius:10px; border:1px solid var(--border);">
+      <div style="font-size:13px; font-weight:700; margin-bottom:10px; color:var(--text);">📅 Weekly Report</div>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="min-width:150px;">
+          <div class="label">Week Start (Monday)</div>
+          <input type="date" id="giWeekFrom" value="<?php
+            $dow = date('N'); $mon = date('Y-m-d', strtotime('-'.($dow-1).' days'));
+            echo $mon; ?>">
+        </div>
+        <div class="field" style="min-width:150px;">
+          <div class="label">Week End (Sunday)</div>
+          <input type="date" id="giWeekTo" value="<?php
+            $dow = date('N'); $sun = date('Y-m-d', strtotime('+'.(7-$dow).' days'));
+            echo $sun; ?>">
+        </div>
+        <div class="field">
+          <button class="btn" type="button" onclick="setWeekRange(-1)" style="background:var(--bg); border:1px solid var(--border); color:var(--text); font-size:12px;">◀ Prev Week</button>
+          <button class="btn" type="button" onclick="setWeekRange(0)" style="background:var(--bg); border:1px solid var(--border); color:var(--text); font-size:12px; margin-left:4px;">This Week</button>
+          <button class="btn" type="button" onclick="setWeekRange(1)" style="background:var(--bg); border:1px solid var(--border); color:var(--text); font-size:12px; margin-left:4px;">Next Week ▶</button>
+        </div>
+        <div class="spacer"></div>
+        <div class="field">
+          <button class="btn" type="button" onclick="exportGrossIncome('weekly')" style="background:#1a7f37; color:white; border:none; padding:10px 22px; font-size:13px;">
+            📥 Export Weekly
+          </button>
+        </div>
       </div>
-      <div class="field" style="min-width:150px;">
-        <div class="label">To Date</div>
-        <input type="date" name="dt_to" id="giTo" value="<?php echo date('Y-m-t'); ?>" required>
+    </div>
+
+    <!-- Monthly Export -->
+    <div style="margin-top:10px; padding:14px; background:var(--surface2); border-radius:10px; border:1px solid var(--border);">
+      <div style="font-size:13px; font-weight:700; margin-bottom:10px; color:var(--text);">📆 Monthly Report</div>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="min-width:170px;">
+          <div class="label">Month</div>
+          <input type="month" id="giMonth" value="<?php echo date('Y-m'); ?>">
+        </div>
+        <div class="spacer"></div>
+        <div class="field">
+          <button class="btn" type="button" onclick="exportGrossIncome('monthly')" style="background:#548235; color:white; border:none; padding:10px 22px; font-size:13px;">
+            📥 Export Monthly
+          </button>
+        </div>
       </div>
-      <div class="field">
-        <button class="btn" type="button" onclick="setGIRange('month')" style="background:var(--surface2); color:var(--text); border:1px solid var(--border);">📅 This Month</button>
-        <button class="btn" type="button" onclick="setGIRange('week')" style="background:var(--surface2); color:var(--text); border:1px solid var(--border); margin-left:6px;">📅 This Week</button>
-      </div>
-      <div class="spacer"></div>
-      <div class="field">
-        <button class="btn" type="submit" style="background:#548235; color:white; border:none; padding:10px 20px;">
-          📥 Export Gross Income
-        </button>
-      </div>
-    </form>
+    </div>
   </div>
 </div>
 
 <script>
-function setGIRange(type) {
+function getThisWeek() {
   const d = new Date();
-  if (type === 'month') {
-    const y = d.getFullYear(), m = d.getMonth();
-    const firstDay = new Date(y, m, 1);
-    const lastDay = new Date(y, m + 1, 0);
-    document.getElementById('giFrom').value = firstDay.toISOString().split('T')[0];
-    document.getElementById('giTo').value = lastDay.toISOString().split('T')[0];
-  } else if (type === 'week') {
-    // Current week (Monday to Sunday)
-    const day = d.getDay() || 7; // Get current day number, converting Sun (0) to 7
-    if (day !== 1) d.setHours(-24 * (day - 1)); // Set to Monday
-    const firstDay = new Date(d);
-    const lastDay = new Date(d.getTime() + 6 * 24 * 60 * 60 * 1000); // Set to Sunday
-    document.getElementById('giFrom').value = firstDay.toISOString().split('T')[0];
-    document.getElementById('giTo').value = lastDay.toISOString().split('T')[0];
+  const dow = d.getDay() || 7;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - (dow - 1));
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  return { from: mon.toISOString().split('T')[0], to: sun.toISOString().split('T')[0] };
+}
+
+function setWeekRange(offset) {
+  const cur = getThisWeek();
+  const fromDate = new Date(cur.from);
+  fromDate.setDate(fromDate.getDate() + offset * 7);
+  const toDate = new Date(fromDate);
+  toDate.setDate(fromDate.getDate() + 6);
+  document.getElementById('giWeekFrom').value = fromDate.toISOString().split('T')[0];
+  document.getElementById('giWeekTo').value   = toDate.toISOString().split('T')[0];
+}
+
+function exportGrossIncome(type) {
+  let dtFrom, dtTo;
+  if (type === 'weekly') {
+    dtFrom = document.getElementById('giWeekFrom').value;
+    dtTo   = document.getElementById('giWeekTo').value;
+    if (!dtFrom || !dtTo) { alert('Please select a week range.'); return; }
+  } else {
+    const m = document.getElementById('giMonth').value; // e.g. "2026-05"
+    if (!m) { alert('Please select a month.'); return; }
+    const [y, mo] = m.split('-');
+    dtFrom = y + '-' + mo + '-01';
+    const lastDay = new Date(parseInt(y), parseInt(mo), 0).getDate();
+    dtTo = y + '-' + mo + '-' + String(lastDay).padStart(2, '0');
   }
+  const url = 'exports/export_gross_income.php?dt_from=' + dtFrom + '&dt_to=' + dtTo + '&type=' + type;
+  window.open(url, '_blank');
 }
 </script>
 
