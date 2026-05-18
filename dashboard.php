@@ -90,10 +90,10 @@ $chartStmt = db()->prepare("
     WHERE gs.end_time IS NOT NULL AND gs.is_voided = 0 AND DATE(gs.end_time) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
     GROUP BY DATE(gs.end_time), t.type
     UNION ALL
-    SELECT rental_date AS d, 'kubo' AS type, COALESCE(SUM(payment_amount),0) AS income
+    SELECT DATE(end_time) AS d, 'kubo' AS type, COALESCE(SUM(payment_amount),0) AS income
     FROM kubo_rentals
-    WHERE status = 'completed' AND is_voided = 0 AND rental_date BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
-    GROUP BY rental_date
+    WHERE status = 'completed' AND is_voided = 0 AND DATE(end_time) BETWEEN DATE_SUB(?, INTERVAL 6 DAY) AND ?
+    GROUP BY DATE(end_time)
   ) combined
   GROUP BY d, type
   ORDER BY d ASC

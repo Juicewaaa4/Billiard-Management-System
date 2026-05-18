@@ -332,6 +332,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       db()->beginTransaction();
       db()->prepare("UPDATE game_sessions SET end_time = NOW() WHERE id = ?")->execute([$sessionId]);
       db()->prepare("UPDATE tables SET status='available' WHERE id=?")->execute([(int) $s['table_id']]);
+      if (!empty($s['reservation_id'])) {
+        db()->prepare("UPDATE reservations SET status = 'completed' WHERE id = ?")->execute([$s['reservation_id']]);
+      }
       db()->commit();
 
       $returnUrl = (string)($_POST['return_url'] ?? 'tables.php');
