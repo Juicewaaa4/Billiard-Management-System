@@ -18,25 +18,13 @@ if (!$dtFrom || !$dtTo) {
     die("Invalid date range");
 }
 
-// Get operational hours to define a "Business Day"
-$opStart = '08:00';
-$opEnd = '05:00';
-try {
-  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('dt_op_start','dt_op_end')");
-  foreach ($ssStmt->fetchAll() as $ss) {
-    if ($ss['setting_key'] === 'dt_op_start') $opStart = $ss['setting_value'];
-    if ($ss['setting_key'] === 'dt_op_end') $opEnd = $ss['setting_value'];
-  }
-} catch (Throwable $ignore) {}
-
 // Fetch all tables
 $tablesStmt = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted = 0 ORDER BY type DESC, id ASC");
 $tables = $tablesStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// We need to fetch all game_sessions and kubo_rentals in this broad range to avoid querying inside the loop
-// Add buffer of 1 day to the ends to cover overnight shifts
-$startBound = date('Y-m-d H:i:s', strtotime("$dtFrom $opStart") - 86400);
-$endBound   = date('Y-m-d H:i:s', strtotime("$dtTo $opStart") + 172800);
+// We need to fetch all game_sessions and kubo_rentals in this date range
+$startBound = $dtFrom . ' 00:00:00';
+$endBound   = $dtTo . ' 23:59:59';
 
 // Fetch Game Sessions (Regular, VIP, KTV/Kubo Karaoke)
 $gsStmt = db()->prepare("
@@ -58,19 +46,6 @@ $krStmt = db()->prepare("
 $krStmt->execute([$startBound, $endBound]);
 $rentals = $krStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Function to determine which "Business Date" a timestamp belongs to
-function getBusinessDate($timestamp, $opStart) {
-    $ts = strtotime($timestamp);
-    $timeOfDay = date('H:i:s', $ts);
-    $dateOfDay = date('Y-m-d', $ts);
-    
-    // If the time is before the opStart (e.g. 2:00 AM < 8:00 AM), it belongs to the PREVIOUS calendar day
-    if ($timeOfDay < $opStart . ':00') {
-        return date('Y-m-d', strtotime($dateOfDay . ' -1 day'));
-    }
-    return $dateOfDay;
-}
-
 // Group data by business date and table
 $incomeData = [];
 $dates = [];
@@ -89,7 +64,7 @@ while ($currentTs <= $endTsObj) {
 
 // Process sessions
 foreach ($sessions as $s) {
-    $bDate = getBusinessDate($s['end_time'], $opStart);
+    $bDate = date('Y-m-d', strtotime($s['end_time']));
     if (isset($incomeData[$bDate][$s['table_id']])) {
         $incomeData[$bDate][$s['table_id']] += (float)$s['total_amount'];
     }
@@ -97,7 +72,7 @@ foreach ($sessions as $s) {
 
 // Process kubo rentals
 foreach ($rentals as $r) {
-    $bDate = getBusinessDate($r['end_time'], $opStart);
+    $bDate = date('Y-m-d', strtotime($r['end_time']));
     if (isset($incomeData[$bDate][$r['table_id']])) {
         $incomeData[$bDate][$r['table_id']] += (float)$r['payment_amount'];
     }

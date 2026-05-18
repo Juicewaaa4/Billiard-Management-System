@@ -231,8 +231,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $session = $s->fetch();
       if (!$session) throw new RuntimeException('Session not found or already ended.');
 
-      $rate = (float)$session['rate_per_hour'];
+      $rate = (float)$session['current_rate'];
       $cost = round($rate * $hours, 2);
+
+      // Check for overlapping reservations before extending
+      if (!empty($session['scheduled_end_time'])) {
+          $newEndTs = strtotime($session['scheduled_end_time']) + (int)($hours * 3600);
+          $newEndTimeStr = date('H:i:s', $newEndTs);
+          $resDate = date('Y-m-d', $newEndTs);
+          $currentEndTimeStr = date('H:i:s', strtotime($session['scheduled_end_time']));
+
+          $overlap = db()->prepare("
+            SELECT id FROM reservations
+            WHERE table_id = ? AND reservation_date = ? AND status = 'pending'
+            AND (
+              (start_time < ? AND ADDTIME(start_time, SEC_TO_TIME(duration_hours * 3600)) > ?)
+            )
+          ");
+          $overlap->execute([$session['table_id'], $resDate, $newEndTimeStr, $currentEndTimeStr]);
+          if ($overlap->fetch()) {
+              throw new RuntimeException('Cannot extend. This table has an upcoming reservation that overlaps with the extended time.');
+          }
+      }
 
       if (round($payment, 2) < round($cost, 2) - 0.01)
         throw new RuntimeException('Payment not enough. Required: ₱' . number_format($cost, 2));
@@ -860,7 +880,7 @@ render_header('VIP Table With Karaoke', 'vip_tables');
         <button type="button" class="hour-btn" data-hours="5">5 hrs</button>
       </div>
 
-      <div id="karaokeOptionWrapper">
+      <div id="karaokeOptionWrapper"> 
         <label style="display:block; margin:14px 0 6px; color:var(--muted); font-size:12px; text-transform:uppercase;">Options</label>
         <div style="display:flex; gap:10px; margin-bottom:14px;" id="karaokeOption">
           <label style="flex:1; border:1px solid var(--border); padding:10px; border-radius:8px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; background:var(--surface2);">
