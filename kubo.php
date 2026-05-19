@@ -847,12 +847,12 @@ if (ekActive) { ekActive.style.background = '#a855f7'; ekActive.style.color = 'w
 
 // ── Countdown Timers ──
 document.querySelectorAll('[data-countdown]').forEach(el => {
-  const endTimeStr = el.dataset.countdown;
+  const endTimeStr = el.dataset.countdown.replace(' ', 'T'); // Normalize for cross-browser parsing
   if (!endTimeStr) return;
-  // Replace dashes with slashes for broader browser support
-  const endTime = new Date(endTimeStr.replace(/-/g, '/'));
+  const endTime = new Date(endTimeStr);
   function tick() {
-    const now = new Date();
+    // Use time offset to sync with server time!
+    const now = new Date(Date.now() + (window.TIME_OFFSET || 0));
     let diff = Math.floor((endTime - now) / 1000);
     if (diff <= 0) {
       el.textContent = "TIME'S UP";
@@ -863,6 +863,13 @@ document.querySelectorAll('[data-countdown]').forEach(el => {
     const m = Math.floor((diff % 3600) / 60);
     const s = diff % 60;
     el.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    
+    // Visual 10-minute warning
+    if (diff <= 600) {
+       el.style.backgroundColor = '#f59e0b';
+       el.style.color = '#fff';
+    }
+    
     setTimeout(tick, 1000);
   }
   tick();

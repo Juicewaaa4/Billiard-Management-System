@@ -300,9 +300,10 @@ render_header('Dashboard', 'dashboard');
 
   <script>
     document.querySelectorAll('[data-dashboard-countdown]').forEach(el => {
-      const endTime = new Date(el.dataset.dashboardCountdown);
+      const endTimeStr = el.dataset.dashboardCountdown.replace(' ', 'T');
+      const endTime = new Date(endTimeStr);
       function tick() {
-        const now = new Date();
+        const now = new Date(Date.now() + (window.TIME_OFFSET || 0));
         let diff = Math.floor((endTime - now) / 1000);
         if (diff <= 0) {
           el.textContent = "TIME'S UP";
@@ -313,6 +314,13 @@ render_header('Dashboard', 'dashboard');
         const m = Math.floor((diff % 3600) / 60);
         const s = diff % 60;
         el.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        
+        // Visual 10-minute warning
+        if (diff <= 600) {
+           el.style.backgroundColor = '#f59e0b';
+           el.style.color = '#fff';
+        }
+        
         setTimeout(tick, 1000);
       }
       tick();

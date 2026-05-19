@@ -22,10 +22,6 @@ if (!$dtFrom || !$dtTo) {
 // Fetch all non-kubo tables (regular, vip, ktv) ordered nicely
 $regularTables = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted = 0 AND type IN ('regular','vip','ktv') ORDER BY CASE type WHEN 'regular' THEN 1 WHEN 'vip' THEN 2 WHEN 'ktv' THEN 3 END, id ASC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch kubo tables for STORE column
-$kuboTables = db()->query("SELECT id FROM tables WHERE is_deleted = 0 AND type = 'kubo'")->fetchAll(PDO::FETCH_ASSOC);
-$kuboIds = array_column($kuboTables, 'id');
-
 // Date bounds
 $startBound = $dtFrom . ' 00:00:00';
 $endBound   = $dtTo . ' 23:59:59';
@@ -41,16 +37,6 @@ $gsStmt = db()->prepare("
 $gsStmt->execute([$startBound, $endBound]);
 $sessions = $gsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch kubo rentals (STORE income)
-$krStmt = db()->prepare("
-    SELECT table_id, end_time, payment_amount
-    FROM kubo_rentals
-    WHERE is_voided = 0 AND end_time IS NOT NULL
-      AND end_time >= ? AND end_time <= ?
-");
-$krStmt->execute([$startBound, $endBound]);
-$kuboRentals = $krStmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Build date list
 $dates = [];
 $currentTs = strtotime($dtFrom);
@@ -62,10 +48,8 @@ while ($currentTs <= $endTs) {
 
 // Initialize income data arrays per date
 $incomeByDate = [];    // [date][table_id] = amount
-$storeByDate  = [];    // [date] = kubo total
 foreach ($dates as $d) {
     $incomeByDate[$d] = [];
-    $storeByDate[$d] = 0.0;
     foreach ($regularTables as $t) {
         $incomeByDate[$d][$t['id']] = 0.0;
     }
@@ -76,19 +60,8 @@ foreach ($sessions as $s) {
     $d = date('Y-m-d', strtotime($s['end_time']));
     if (!isset($incomeByDate[$d])) continue;
     $tid = (int)$s['table_id'];
-    if (in_array($tid, $kuboIds)) {
-        // Kubo karaoke → STORE
-        $storeByDate[$d] += (float)$s['total_amount'];
-    } elseif (isset($incomeByDate[$d][$tid])) {
+    if (isset($incomeByDate[$d][$tid])) {
         $incomeByDate[$d][$tid] += (float)$s['total_amount'];
-    }
-}
-
-// Process kubo rentals → STORE
-foreach ($kuboRentals as $r) {
-    $d = date('Y-m-d', strtotime($r['end_time']));
-    if (isset($storeByDate[$d])) {
-        $storeByDate[$d] += (float)$r['payment_amount'];
     }
 }
 
@@ -105,9 +78,9 @@ if ($reportType === 'weekly') {
     $fileTitle = 'Monthly_Gross_Income_' . date('Y_m', strtotime($dtFrom)) . '.xls';
 }
 
-// Total columns = DATE(1) + STORE(1) + regularTables + TOTAL(1)
+// Total columns = DATE(1) + regularTables + TOTAL(1)
 $tableCols = count($regularTables);
-$totalCols = 1 + 1 + $tableCols + 1; // DATE + STORE + tables + TOTAL
+$totalCols = 1 + $tableCols + 1; // DATE + tables + TOTAL
 
 header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
 header('Content-Disposition: attachment; filename="' . $fileTitle . '"');
@@ -129,10 +102,6 @@ header('Expires: 0');
     background-color: #548235; color: white; font-weight: bold;
     text-align: center; border: 1px solid #000; vertical-align: middle;
   }
-  .hdr-store {
-    background-color: #548235; color: white; font-weight: bold;
-    text-align: center; border: 1px solid #000; vertical-align: middle;
-  }
   .hdr-total {
     background-color: #548235; color: white; font-weight: bold;
     text-align: center; border: 1px solid #000; vertical-align: middle;
@@ -142,7 +111,6 @@ header('Expires: 0');
     text-align: center; border: 1px solid #000;
   }
   .cell-date { text-align: left; border: 1px solid #ccc; padding: 2px 6px; }
-  .cell-store { text-align: right; border: 1px solid #ccc; padding: 2px 4px; }
   .cell-amt  { text-align: right; border: 1px solid #ccc; padding: 2px 4px; }
   .cell-zero { text-align: right; border: 1px solid #ccc; padding: 2px 4px; color: #333; }
   .cell-rowtotal { text-align: right; border: 1px solid #ccc; padding: 2px 4px; font-weight: bold; }
@@ -163,10 +131,9 @@ header('Expires: 0');
   </tr>
   <tr><td colspan="<?= $totalCols ?>"></td></tr>
 
-  <?php /* ── Header Row 1: DATE | STORE | BILLIARDS (spanning) | TOTAL ── */ ?>
+  <?php /* ── Header Row 1: DATE | BILLIARDS (spanning) | TOTAL ── */ ?>
   <tr>
     <td rowspan="2" class="hdr-date" style="width:90px;">DATE</td>
-    <td rowspan="2" class="hdr-store" style="width:90px;">STORE</td>
     <td colspan="<?= $tableCols ?>" class="hdr-billiards">BILLIARDS</td>
     <td rowspan="2" class="hdr-total" style="width:110px;">TOTAL</td>
   </tr>
@@ -180,7 +147,6 @@ header('Expires: 0');
 
   <?php
   // Track grand totals
-  $grandStore = 0.0;
   $grandCols  = array_fill(0, $tableCols, 0.0);
   $grandTotal = 0.0;
 
@@ -200,29 +166,18 @@ header('Expires: 0');
     <?php endif; $isFirst = false;
     $isFirstRowOfWeek = true;
     foreach ($weekDates as $d):
-      $store    = $storeByDate[$d];
-      $rowTotal = $store;
+      $rowTotal = 0;
       $colAmts  = [];
       foreach ($regularTables as $t) {
           $a = $incomeByDate[$d][$t['id']];
           $colAmts[] = $a;
           $rowTotal += $a;
       }
-      $grandStore += $store;
       $grandTotal += $rowTotal;
       foreach ($colAmts as $ci => $a) $grandCols[$ci] += $a;
       ?>
       <tr>
         <td class="cell-date"><?= date('d-M-y', strtotime($d)) ?></td>
-
-        <?php /* STORE cell — show ₱ prefix on first row of each week */ ?>
-        <?php if ($isFirstRowOfWeek): ?>
-          <td class="cell-store" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'">
-            <?php if ($store > 0): ?>&#8369;&nbsp;<?= number_format($store, 2) ?><?php else: ?>&#8369;&nbsp;<?= number_format(0, 2) ?><?php endif; ?>
-          </td>
-        <?php else: ?>
-          <td class="cell-<?= $store > 0 ? 'amt' : 'zero' ?>" style="mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($store, 2) ?></td>
-        <?php endif; ?>
 
         <?php foreach ($colAmts as $ci => $a): ?>
           <?php if ($isFirstRowOfWeek): ?>
@@ -244,7 +199,6 @@ header('Expires: 0');
   <?php /* ── Grand Total Row ── */ ?>
   <tr class="row-total-row">
     <td style="text-align:center; font-weight:bold;">TOTAL</td>
-    <td style="text-align:right; mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($grandStore, 2) ?></td>
     <?php foreach ($grandCols as $gc): ?>
       <td style="text-align:right; mso-number-format:'\[$₱\]\ \#\,\#\#0\.00'"><?= number_format($gc, 2) ?></td>
     <?php endforeach; ?>

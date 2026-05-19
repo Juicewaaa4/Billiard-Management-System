@@ -64,12 +64,12 @@ function deadPeriodsForTable(int $tableId, string $date, string $startT, string 
     foreach ($rows as $r) {
         $ss = max(strtotime($r['start_time']), $opStart);
         $se = $r['eff_end'] ? min(strtotime($r['eff_end']), $opEnd) : $opEnd;
-        if ($ss > $cursor && ($ss - $cursor) >= 60) {
+        if ($ss > $cursor && ($ss - $cursor) >= 1800) { // 30 minutes minimum
             $dead[] = ['from' => $cursor, 'to' => $ss, 'dur' => $ss - $cursor];
         }
         $cursor = max($cursor, $se);
     }
-    if ($cursor < $opEnd && ($opEnd - $cursor) >= 60) {
+    if ($cursor < $opEnd && ($opEnd - $cursor) >= 1800) { // 30 minutes minimum
         $dead[] = ['from' => $cursor, 'to' => $opEnd, 'dur' => $opEnd - $cursor];
     }
     return $dead;

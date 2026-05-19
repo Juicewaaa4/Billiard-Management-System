@@ -379,6 +379,13 @@ function render_footer(): void
       }
       
       setInterval(checkTimeoutsGlobally, 3000);
+
+      // --- SERVER TIME SYNC ---
+      // Calculate offset between this client PC and the server clock
+      // This prevents wrong countdown timers on different computers.
+      const SERVER_NOW_MS = <?php echo time() * 1000; ?>;
+      const CLIENT_NOW_MS = Date.now();
+      window.TIME_OFFSET = SERVER_NOW_MS - CLIENT_NOW_MS;
     </script>
     <script src="assets/js/script.js"></script>
   </body>

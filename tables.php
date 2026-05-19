@@ -294,6 +294,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (!$session)
         throw new RuntimeException('Session not found or already ended.');
 
+      // Check for overlapping reservations before adding loyalty hour
+      if (!empty($session['scheduled_end_time'])) {
+          $newEndTs = strtotime($session['scheduled_end_time']) + 3600; // +1 hour
+          $newEndTimeStr = date('H:i:s', $newEndTs);
+          $resDate = date('Y-m-d', $newEndTs);
+          $currentEndTimeStr = date('H:i:s', strtotime($session['scheduled_end_time']));
+
+          $overlap = db()->prepare("
+            SELECT id FROM reservations
+            WHERE table_id = ? AND reservation_date = ? AND status = 'pending'
+            AND (
+              (start_time < ? AND ADDTIME(start_time, SEC_TO_TIME(duration_hours * 3600)) > ?)
+            )
+          ");
+          $overlap->execute([$session['table_id'], $resDate, $newEndTimeStr, $currentEndTimeStr]);
+          if ($overlap->fetch()) {
+              throw new RuntimeException('Cannot add loyalty hour. This table has an upcoming reservation that would overlap.');
+          }
+      }
+
       db()->beginTransaction();
 
       db()->prepare("
@@ -1120,19 +1140,29 @@ render_header('Tables', 'tables');
 
   // ── Countdown Timers ──
   document.querySelectorAll('[data-countdown]').forEach(el => {
-    const endTime = new Date(el.dataset.countdown);
+    const endTimeStr = el.dataset.countdown.replace(' ', 'T'); // Normalize for cross-browser parsing
+    const endTime = new Date(endTimeStr);
     function tick() {
-      const now = new Date();
+      // Use time offset to sync with server time!
+      const now = new Date(Date.now() + (window.TIME_OFFSET || 0));
       let diff = Math.floor((endTime - now) / 1000);
       if (diff <= 0) {
         el.textContent = "TIME'S UP";
         el.className = 'badge badge--danger';
         return;
       }
+      
       const h = Math.floor(diff / 3600);
       const m = Math.floor((diff % 3600) / 60);
       const s = diff % 60;
       el.textContent = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+      
+      // Visual 10-minute warning
+      if (diff <= 600) {
+         el.style.backgroundColor = '#f59e0b';
+         el.style.color = '#fff';
+      }
+      
       setTimeout(tick, 1000);
     }
     tick();
