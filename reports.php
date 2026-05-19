@@ -251,14 +251,26 @@ render_header('Reports', 'reports');
         </div>
       </div>
       <div class="spacer"></div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
         <button class="btn" type="button" onclick="exportGrossIncome('weekly')"
           style="background:#1a7f37; color:white; border:none; padding:12px 26px; font-size:14px; font-weight:700; border-radius:8px;">
           📅 Export Weekly
         </button>
+
+        <div style="border-left: 2px solid var(--border); height: 30px; margin: 0 5px;"></div>
+        
+        <input type="month" id="monthlyExportMonth" value="<?php echo date('Y-m'); ?>" style="width: 140px;">
         <button class="btn" type="button" onclick="exportGrossIncome('monthly')"
           style="background:#548235; color:white; border:none; padding:12px 26px; font-size:14px; font-weight:700; border-radius:8px;">
           📆 Export Monthly
+        </button>
+
+        <div style="border-left: 2px solid var(--border); height: 30px; margin: 0 5px;"></div>
+
+        <input type="number" id="annualExportYear" value="<?php echo date('Y'); ?>" min="2020" max="2100" style="width: 100px;">
+        <button class="btn" type="button" onclick="exportGrossIncome('annual')"
+          style="background:#0284c7; color:white; border:none; padding:12px 26px; font-size:14px; font-weight:700; border-radius:8px;">
+          📊 Export Annual
         </button>
       </div>
     </div>
@@ -283,6 +295,12 @@ function exportGrossIncome(type) {
   let dtFrom, dtTo;
   const now = new Date();
 
+  if (type === 'annual') {
+      const yr = document.getElementById('annualExportYear').value;
+      window.open('exports/export_annual_income.php?year=' + yr, '_blank');
+      return;
+  }
+
   if (type === 'weekly') {
     // Previous week: last Monday to last Sunday
     const dow = now.getDay() || 7; // 1=Mon, 7=Sun
@@ -292,15 +310,15 @@ function exportGrossIncome(type) {
     lastSun.setDate(lastMon.getDate() + 6);
     dtFrom = lastMon.toISOString().split('T')[0];
     dtTo   = lastSun.toISOString().split('T')[0];
-  } else {
-    // Current month: 1st to last day
-    const y  = now.getFullYear();
-    const mo = now.getMonth(); // 0-indexed
-    const firstDay = new Date(y, mo, 1);
-    const lastDay  = new Date(y, mo + 1, 0);
-    dtFrom = firstDay.toISOString().split('T')[0];
-    dtTo   = lastDay.toISOString().split('T')[0];
-}
+  } else if (type === 'monthly') {
+    const val = document.getElementById('monthlyExportMonth').value; // YYYY-MM
+    if(!val) return;
+    const y = parseInt(val.split('-')[0]);
+    const m = parseInt(val.split('-')[1]);
+    const lastDay = new Date(y, m, 0).getDate();
+    dtFrom = y + '-' + String(m).padStart(2,'0') + '-01';
+    dtTo   = y + '-' + String(m).padStart(2,'0') + '-' + String(lastDay).padStart(2,'0');
+  }
   const url = 'exports/export_gross_income.php?dt_from=' + dtFrom + '&dt_to=' + dtTo + '&type=' + type;
   window.open(url, '_blank');
 }

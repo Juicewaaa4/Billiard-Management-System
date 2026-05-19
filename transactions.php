@@ -12,6 +12,46 @@ require_role(['admin']);
 
 $flash = flash_get();
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_missing_game') {
+    try {
+        $tableId = (int)$_POST['table_id'];
+        $walkInName = trim($_POST['walk_in_name']);
+        $startTime = $_POST['start_time']; // YYYY-MM-DDTHH:MM
+        $endTime = $_POST['end_time'];
+        $totalAmt = (float)$_POST['total_amount'];
+        
+        $startFormatted = date('Y-m-d H:i:s', strtotime($startTime));
+        $endFormatted = date('Y-m-d H:i:s', strtotime($endTime));
+        $durSecs = max(0, strtotime($endFormatted) - strtotime($startFormatted));
+        
+        $tInfo = db()->prepare("SELECT type FROM tables WHERE id = ?");
+        $tInfo->execute([$tableId]);
+        $tType = $tInfo->fetchColumn();
+        $isKubo = ($tType === 'kubo');
+        
+        db()->beginTransaction();
+        if ($isKubo) {
+            $stmt = db()->prepare("INSERT INTO kubo_rentals (table_id, customer_name, payment_amount, status, created_at, end_time) VALUES (?, ?, ?, 'completed', ?, ?)");
+            $stmt->execute([$tableId, $walkInName, $totalAmt, $startFormatted, $endFormatted]);
+        } else {
+            $stmt = db()->prepare("INSERT INTO game_sessions (table_id, walk_in_name, rate_per_hour, hours_purchased, start_time, end_time, duration_seconds, total_amount, created_by) VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)");
+            $stmt->execute([$tableId, $walkInName, $startFormatted, $endFormatted, $durSecs, $totalAmt, current_user()['id']]);
+            $sessionId = (int)db()->lastInsertId();
+            
+            $stmt2 = db()->prepare("INSERT INTO transactions (session_id, amount, payment, change_amount, type, created_by) VALUES (?, ?, ?, 0, 'full', ?)");
+            $stmt2->execute([$sessionId, $totalAmt, $totalAmt, current_user()['id']]);
+        }
+        db()->commit();
+        flash_set('ok', 'Missing record added successfully!');
+        redirect('transactions.php');
+    } catch (Throwable $e) {
+        if(db()->inTransaction()) db()->rollBack();
+        flash_set('err', 'Error adding record: ' . $e->getMessage());
+        redirect('transactions.php');
+    }
+}
+
+
 $from = parse_date((string)($_GET['from'] ?? date('Y-m-d')));
 $to = parse_date((string)($_GET['to'] ?? date('Y-m-d')));
 $customerId = (int)($_GET['customer_id'] ?? 0);
@@ -100,6 +140,7 @@ usort($rows, function($a, $b) {
 });
 
 $customers = db()->query("SELECT id, name FROM customers ORDER BY name ASC")->fetchAll();
+$allTables = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted=0 ORDER BY table_number ASC")->fetchAll();
 
 render_header('Transactions', 'transactions');
 ?>
@@ -118,6 +159,9 @@ render_header('Transactions', 'transactions');
     </div>
     <div class="spacer"></div>
     <div style="display: flex; gap: 10px;">
+      <button class="btn" onclick="document.getElementById('addMissingModal').style.display='flex'" style="background-color: #6366f1; color: white; border: none;">
+        + Add Missing Game
+      </button>
       <a class="btn" href="exports/export_transactions.php?<?php echo http_build_query($_GET); ?>" target="_blank" style="background-color: #22c55e; color: white; border: none;">
         Export CSV
       </a>
@@ -237,4 +281,54 @@ function setYesterday() {
   window.location.href = url.toString();
 }
 </script>
+
+<!-- Add Missing Game Modal -->
+<div id="addMissingModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box" style="max-width:450px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h3 style="margin:0;">📝 Add Missing Record</h3>
+      <span onclick="document.getElementById('addMissingModal').style.display='none'" style="cursor:pointer; font-size:24px; color:var(--muted);">&times;</span>
+    </div>
+    
+    <form method="post" class="form">
+      <input type="hidden" name="action" value="add_missing_game">
+      
+      <div class="field">
+        <label class="label">Table / Kubo</label>
+        <select name="table_id" required>
+          <option value="">Select Table...</option>
+          <?php foreach ($allTables as $tb): ?>
+            <option value="<?php echo (int)$tb['id']; ?>"><?php echo h($tb['table_number'] . ' (' . strtoupper($tb['type']) . ')'); ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="label">Customer Name</label>
+        <input type="text" name="walk_in_name" placeholder="Walk-in or enter name" required>
+      </div>
+
+      <div class="row" style="gap:10px;">
+        <div class="field" style="flex:1;">
+          <label class="label">Time Started</label>
+          <input type="datetime-local" name="start_time" required>
+        </div>
+        <div class="field" style="flex:1;">
+          <label class="label">Time Ended</label>
+          <input type="datetime-local" name="end_time" required>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label">Total Amount Paid (₱)</label>
+        <input type="number" step="0.01" name="total_amount" min="0" required>
+      </div>
+
+      <div style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn btn--ghost" onclick="document.getElementById('addMissingModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn--primary">Save Record</button>
+      </div>
+    </form>
+  </div>
+</div>
 
