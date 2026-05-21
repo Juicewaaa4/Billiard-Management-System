@@ -291,6 +291,13 @@ render_header('Reports', 'reports');
 </div>
 
 <script>
+function fmtYmd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const r = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${r}`;
+}
+
 function exportGrossIncome(type) {
   let dtFrom, dtTo;
   const now = new Date();
@@ -308,8 +315,8 @@ function exportGrossIncome(type) {
     lastMon.setDate(now.getDate() - (dow - 1) - 7);
     const lastSun = new Date(lastMon);
     lastSun.setDate(lastMon.getDate() + 6);
-    dtFrom = lastMon.toISOString().split('T')[0];
-    dtTo   = lastSun.toISOString().split('T')[0];
+    dtFrom = fmtYmd(lastMon);
+    dtTo   = fmtYmd(lastSun);
   } else if (type === 'monthly') {
     const val = document.getElementById('monthlyExportMonth').value; // YYYY-MM
     if(!val) return;

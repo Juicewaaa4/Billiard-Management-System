@@ -31,8 +31,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_m
         
         db()->beginTransaction();
         if ($isKubo) {
-            $stmt = db()->prepare("INSERT INTO kubo_rentals (table_id, customer_name, payment_amount, status, created_at, end_time) VALUES (?, ?, ?, 'completed', ?, ?)");
-            $stmt->execute([$tableId, $walkInName, $totalAmt, $startFormatted, $endFormatted]);
+            $rentalDate = date('Y-m-d', strtotime($startFormatted));
+            $stmt = db()->prepare("INSERT INTO kubo_rentals (table_id, customer_name, payment_amount, rental_date, status, created_at, end_time, created_by) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)");
+            $stmt->execute([$tableId, $walkInName, $totalAmt, $rentalDate, $startFormatted, $endFormatted, current_user()['id']]);
         } else {
             $stmt = db()->prepare("INSERT INTO game_sessions (table_id, walk_in_name, rate_per_hour, hours_purchased, start_time, end_time, duration_seconds, total_amount, created_by) VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)");
             $stmt->execute([$tableId, $walkInName, $startFormatted, $endFormatted, $durSecs, $totalAmt, current_user()['id']]);
@@ -269,10 +270,17 @@ render_header('Transactions', 'transactions');
 <?php render_footer(); ?>
 
 <script>
+function fmtYmd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const r = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${r}`;
+}
+
 function setYesterday() {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  const dateStr = yesterday.toISOString().split('T')[0];
+  const dateStr = fmtYmd(yesterday);
   
   const url = new URL(window.location);
   url.searchParams.set('from', dateStr);
