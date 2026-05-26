@@ -77,6 +77,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
 }
 
 
+// ── Handle Add Missing Game ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_missing_game') {
+    try {
+        $tableId = (int)$_POST['table_id'];
+        $walkInName = trim($_POST['walk_in_name']);
+        $startTime = $_POST['start_time']; // YYYY-MM-DDTHH:MM
+        $endTime = $_POST['end_time'];
+        $totalAmt = (float)$_POST['total_amount'];
+        
+        $startFormatted = date('Y-m-d H:i:s', strtotime($startTime));
+        $endFormatted = date('Y-m-d H:i:s', strtotime($endTime));
+        $durSecs = max(0, strtotime($endFormatted) - strtotime($startFormatted));
+        
+        $tInfo = db()->prepare("SELECT type FROM tables WHERE id = ?");
+        $tInfo->execute([$tableId]);
+        $tType = $tInfo->fetchColumn();
+        $isKubo = ($tType === 'kubo');
+        
+        db()->beginTransaction();
+        if ($isKubo) {
+            $rentalDate = date('Y-m-d', strtotime($startFormatted));
+            $stmt = db()->prepare("INSERT INTO kubo_rentals (table_id, customer_name, payment_amount, rental_date, status, created_at, end_time, created_by) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)");
+            $stmt->execute([$tableId, $walkInName, $totalAmt, $rentalDate, $startFormatted, $endFormatted, current_user()['id']]);
+        } else {
+            $stmt = db()->prepare("INSERT INTO game_sessions (table_id, walk_in_name, rate_per_hour, hours_purchased, start_time, end_time, duration_seconds, total_amount, created_by) VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)");
+            $stmt->execute([$tableId, $walkInName, $startFormatted, $endFormatted, $durSecs, $totalAmt, current_user()['id']]);
+            $sessionId = (int)db()->lastInsertId();
+            
+            $stmt2 = db()->prepare("INSERT INTO transactions (session_id, payment, change_amount, created_by) VALUES (?, ?, 0, ?)");
+            $stmt2->execute([$sessionId, $totalAmt, current_user()['id']]);
+        }
+        db()->commit();
+        flash_set('ok', 'Missing record added successfully!');
+        redirect('reports.php');
+    } catch (Throwable $e) {
+        if(db()->inTransaction()) db()->rollBack();
+        flash_set('err', 'Error adding record: ' . $e->getMessage());
+        redirect('reports.php');
+    }
+}
+
+$allTables = db()->query("SELECT id, table_number, type FROM tables WHERE is_deleted=0 ORDER BY table_number ASC")->fetchAll();
+
 $mostUsed = db()->query("
   SELECT t.table_number, COUNT(*) AS sessions_count
   FROM game_sessions gs
@@ -183,7 +226,14 @@ $voidStmt->execute([$voidDate]);
 $voidRows = $voidStmt->fetchAll();
 
 render_header('Reports', 'reports');
+$flash = flash_get();
 ?>
+
+<?php if ($flash): ?>
+  <div class="alert alert--<?php echo isset($flash['type']) ? h($flash['type']) : (isset($flash['err']) ? 'danger' : 'ok'); ?>" style="margin-bottom:14px;">
+    <?php echo h($flash['message'] ?? $flash['err'] ?? $flash['ok'] ?? ''); ?>
+  </div>
+<?php endif; ?>
 
 <div class="grid" style="grid-template-columns: 1fr; gap:14px;">
   <div class="card">
@@ -239,6 +289,9 @@ render_header('Reports', 'reports');
       <button class="btn" type="button" onclick="exportShiftTransactions('both')" style="background:#22c55e; color:white; border:none; font-size:13px; padding:10px 20px;">
         📊 Export Both (Full Day)
       </button>
+      <button class="btn" type="button" onclick="document.getElementById('addMissingModal').style.display='flex'" style="background:#f59e0b; color:white; border:none; font-size:13px; padding:10px 20px; margin-left: auto;">
+        + Add Missing Game
+      </button>
     </div>
   </div>
 
@@ -247,11 +300,12 @@ render_header('Reports', 'reports');
       <div>
         <div class="card__title">Gross Income Report</div>
         <div style="margin-top:6px;color:var(--muted);">
-          Auto-generates the report for the correct period. Weekly covers the previous Mon–Sun; Monthly covers the current month.
+          Select a specific week, month, or year below to generate the Gross Income report. The default for weekly is the previous week.
         </div>
       </div>
       <div class="spacer"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <input type="week" id="weeklyExportWeek" value="<?php echo date('o-\WW', strtotime('-'.((int)date('N') - 1 + 7).' days')); ?>" style="width: 140px;">
         <button class="btn" type="button" onclick="exportGrossIncome('weekly')"
           style="background:#1a7f37; color:white; border:none; padding:12px 26px; font-size:14px; font-weight:700; border-radius:8px;">
           📅 Export Weekly
@@ -283,7 +337,7 @@ render_header('Reports', 'reports');
         // Current month
         $curMonthLabel = date('F Y');
       ?>
-      📅 <strong>Weekly:</strong> <?= $prevMon ?> – <?= $prevSun ?>
+      📅 <strong>Weekly:</strong> <?= $prevMon ?> – <?= $prevSun ?> (Default)
       &nbsp;&nbsp;|&nbsp;&nbsp;
       📆 <strong>Monthly:</strong> <?= $curMonthLabel ?>
     </div>
@@ -308,15 +362,11 @@ function exportGrossIncome(type) {
       return;
   }
 
+  let url = '';
   if (type === 'weekly') {
-    // Previous week: last Monday to last Sunday
-    const dow = now.getDay() || 7; // 1=Mon, 7=Sun
-    const lastMon = new Date(now);
-    lastMon.setDate(now.getDate() - (dow - 1) - 7);
-    const lastSun = new Date(lastMon);
-    lastSun.setDate(lastMon.getDate() + 6);
-    dtFrom = fmtYmd(lastMon);
-    dtTo   = fmtYmd(lastSun);
+    const val = document.getElementById('weeklyExportWeek').value; // YYYY-Wxx
+    if(!val) return;
+    url = 'exports/export_gross_income.php?type=weekly&week=' + val;
   } else if (type === 'monthly') {
     const val = document.getElementById('monthlyExportMonth').value; // YYYY-MM
     if(!val) return;
@@ -325,8 +375,8 @@ function exportGrossIncome(type) {
     const lastDay = new Date(y, m, 0).getDate();
     dtFrom = y + '-' + String(m).padStart(2,'0') + '-01';
     dtTo   = y + '-' + String(m).padStart(2,'0') + '-' + String(lastDay).padStart(2,'0');
+    url = 'exports/export_gross_income.php?dt_from=' + dtFrom + '&dt_to=' + dtTo + '&type=' + type;
   }
-  const url = 'exports/export_gross_income.php?dt_from=' + dtFrom + '&dt_to=' + dtTo + '&type=' + type;
   window.open(url, '_blank');
 }
 </script>
@@ -630,3 +680,53 @@ function saveReportSettings(statusElId) {
 </script>
 
 <?php render_footer(); ?>
+
+<!-- Add Missing Game Modal -->
+<div id="addMissingModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box" style="max-width:450px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h3 style="margin:0;">📝 Add Missing Record</h3>
+      <span onclick="document.getElementById('addMissingModal').style.display='none'" style="cursor:pointer; font-size:24px; color:var(--muted);">&times;</span>
+    </div>
+    
+    <form method="post" class="form">
+      <input type="hidden" name="action" value="add_missing_game">
+      
+      <div class="field">
+        <label class="label">Table / Kubo</label>
+        <select name="table_id" required>
+          <option value="">Select Table...</option>
+          <?php foreach ($allTables as $tb): ?>
+            <option value="<?php echo (int)$tb['id']; ?>"><?php echo h($tb['table_number'] . ' (' . strtoupper($tb['type']) . ')'); ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="label">Customer Name</label>
+        <input type="text" name="walk_in_name" placeholder="Walk-in or enter name" required>
+      </div>
+
+      <div class="row" style="gap:10px;">
+        <div class="field" style="flex:1;">
+          <label class="label">Time Started</label>
+          <input type="datetime-local" name="start_time" required>
+        </div>
+        <div class="field" style="flex:1;">
+          <label class="label">Time Ended</label>
+          <input type="datetime-local" name="end_time" required>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label">Total Amount Paid (₱)</label>
+        <input type="number" step="0.01" name="total_amount" min="0" required>
+      </div>
+
+      <div style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn btn--ghost" onclick="document.getElementById('addMissingModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn--primary">Save Record</button>
+      </div>
+    </form>
+  </div>
+</div>

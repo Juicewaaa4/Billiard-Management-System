@@ -349,7 +349,7 @@ render_header('Dashboard', 'dashboard');
 
 <?php render_footer(); ?>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="assets/js/chart.umd.min.js"></script>
 <script>
 
   <?php if ($role === 'admin'): ?>

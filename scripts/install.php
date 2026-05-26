@@ -172,9 +172,9 @@ try {
   // ── Seed Sample Tables ──
   db()->exec("
     INSERT IGNORE INTO tables (table_number, type, status, rate_per_hour) VALUES
-    ('Table 1','available',150.00),
-    ('Table 2','available',150.00),
-    ('Table 3','available',180.00);
+    ('Table 1','regular','available',150.00),
+    ('Table 2','regular','available',150.00),
+    ('Table 3','regular','available',180.00);
   ");
 
   // ═══════════════════════════════════════════════════════════

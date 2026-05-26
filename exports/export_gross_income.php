@@ -12,6 +12,26 @@ $dtFromStr = (string)($_GET['dt_from'] ?? date('Y-m-01'));
 $dtToStr   = (string)($_GET['dt_to'] ?? date('Y-m-t'));
 $reportType = (string)($_GET['type'] ?? 'monthly'); // 'weekly' or 'monthly'
 
+if ($reportType === 'weekly' && !empty($_GET['week'])) {
+    $weekStr = $_GET['week']; // e.g. "2024-W21"
+    $year = (int)substr($weekStr, 0, 4);
+    $week = (int)substr($weekStr, 6);
+    
+    $dto = new DateTime();
+    $dto->setISODate($year, $week);
+    $dtFromStr = $dto->format('Y-m-d');
+    $dto->modify('+6 days');
+    $dtToStr = $dto->format('Y-m-d');
+} elseif ($reportType === 'weekly') {
+    // Fallback if week parameter is missing, calculate previous week
+    $todayDow = (int)date('N');
+    $dto = new DateTime();
+    $dto->modify('-' . ($todayDow - 1 + 7) . ' days');
+    $dtFromStr = $dto->format('Y-m-d');
+    $dto->modify('+6 days');
+    $dtToStr = $dto->format('Y-m-d');
+}
+
 $dtFrom = parse_date($dtFromStr);
 $dtTo   = parse_date($dtToStr);
 
