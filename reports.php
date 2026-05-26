@@ -305,7 +305,8 @@ $flash = flash_get();
       </div>
       <div class="spacer"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-        <input type="week" id="weeklyExportWeek" value="<?php echo date('o-\WW', strtotime('-'.((int)date('N') - 1 + 7).' days')); ?>" style="width: 140px;">
+        <span style="font-size:13px; color:var(--muted);">Start Date:</span>
+        <input type="date" id="weeklyExportStart" value="<?php echo date('Y-m-d', strtotime('-7 days')); ?>" style="width: 140px;" title="Select the start date of the 7-day week">
         <button class="btn" type="button" onclick="exportGrossIncome('weekly')"
           style="background:#1a7f37; color:white; border:none; padding:12px 26px; font-size:14px; font-weight:700; border-radius:8px;">
           📅 Export Weekly
@@ -329,17 +330,9 @@ $flash = flash_get();
       </div>
     </div>
     <div style="margin-top:10px; font-size:12px; color:var(--muted);">
-      <?php
-        // Previous week (Mon–Sun)
-        $todayDow = (int)date('N'); // 1=Mon, 7=Sun
-        $prevMon = date('M d', strtotime('-'.($todayDow - 1 + 7).' days'));
-        $prevSun = date('M d, Y', strtotime('-'.($todayDow).' days'));
-        // Current month
-        $curMonthLabel = date('F Y');
-      ?>
-      📅 <strong>Weekly:</strong> <?= $prevMon ?> – <?= $prevSun ?> (Default)
+      📅 <strong>Weekly:</strong> Select any start date (Generates a 7-day report)
       &nbsp;&nbsp;|&nbsp;&nbsp;
-      📆 <strong>Monthly:</strong> <?= $curMonthLabel ?>
+      📆 <strong>Monthly:</strong> <?= date('F Y') ?>
     </div>
   </div>
 </div>
@@ -364,9 +357,15 @@ function exportGrossIncome(type) {
 
   let url = '';
   if (type === 'weekly') {
-    const val = document.getElementById('weeklyExportWeek').value; // YYYY-Wxx
+    const val = document.getElementById('weeklyExportStart').value;
     if(!val) return;
-    url = 'exports/export_gross_income.php?type=weekly&week=' + val;
+    const parts = val.split('-');
+    const startD = new Date(parts[0], parts[1] - 1, parts[2]);
+    const endD = new Date(startD);
+    endD.setDate(startD.getDate() + 6); // Add 6 days to get a 7-day range
+    dtFrom = fmtYmd(startD);
+    dtTo   = fmtYmd(endD);
+    url = 'exports/export_gross_income.php?dt_from=' + dtFrom + '&dt_to=' + dtTo + '&type=' + type;
   } else if (type === 'monthly') {
     const val = document.getElementById('monthlyExportMonth').value; // YYYY-MM
     if(!val) return;
