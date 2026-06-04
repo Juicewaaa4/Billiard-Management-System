@@ -170,8 +170,8 @@ $headersHtml = '
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Transaction ID</th>
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Table ID</th>
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Players</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Time Range</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Duration</th>
+    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Time Range (Duration)</th>
+    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Game Time</th>
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Total Cost (₱)</th>
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Cashier Name</th>
     <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Transaction Date</th>';
@@ -211,9 +211,10 @@ foreach (['MORNING', 'EVENING'] as $shiftKey) {
          $durationFmt = sprintf('%d:%02d:%02d', $h, $m, $s);
          
          $startTimeStr = date('g:i A', strtotime($r['start_time']));
-         $endTimeStr = date('g:i A', strtotime($r['end_time']));
-         $timeRange = $startTimeStr . ' - ' . $endTimeStr;
+         $schedEndTimeStr = !empty($r['scheduled_end_time']) ? date('g:i A', strtotime($r['scheduled_end_time'])) : date('g:i A', strtotime($r['end_time']));
+         $gameTime = $startTimeStr . ' - ' . $schedEndTimeStr;
          
+         // Transaction Date shows the exact date & time the cashier ended it
          $transactionDate = "'" . date('m/d/Y h:i A', strtotime($r['end_time']));
          
          $tableName = 'Table ' . preg_replace('/[^0-9]/', '', (string)$r['table_number']);
@@ -233,15 +234,13 @@ foreach (['MORNING', 'EVENING'] as $shiftKey) {
              $bgStyle = "background-color: #fdba74;"; // LOYALTY CARD (orange)
          } elseif (!empty($r['is_promo'])) {
              $bgStyle = "background-color: #fbcfe8;"; // EB PROMO (pink)
-         } elseif ($r['tx_count'] > 1) {
-             $bgStyle = "background-color: #60a5fa;"; // FOR ADJUSTMENT (blue) - used for extensions based on the screenshot
          }
          
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">TX-' . htmlspecialchars((string) $r['session_id']) . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($tableName) . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($playerName) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($timeRange) . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($durationFmt) . '</td>';
+         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($gameTime) . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '" x:num="' . $cost . '">' . $cost . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars((string) $r['cashier']) . '</td>';
          echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($transactionDate) . '</td>';
