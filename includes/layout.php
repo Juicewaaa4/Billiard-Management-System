@@ -53,10 +53,12 @@ function render_header(string $title, string $activeNav = ''): void
         </div>
         <nav class="nav">
           <a class="nav__link <?php echo $activeNav === 'dashboard' ? 'is-active' : ''; ?>" href="dashboard.php">Dashboard</a>
-          <a class="nav__link <?php echo $activeNav === 'tables' ? 'is-active' : ''; ?>" href="tables.php">Tables</a>
-          <a class="nav__link <?php echo $activeNav === 'vip_tables' ? 'is-active' : ''; ?>" href="vip_tables.php">VIP Table With Karaoke</a>
-          <a class="nav__link <?php echo $activeNav === 'reservations' ? 'is-active' : ''; ?>" href="reservations.php">Reservations</a>
-          <a class="nav__link <?php echo $activeNav === 'kubo' ? 'is-active' : ''; ?>" href="kubo.php">Kubo</a>
+          <?php if ($role === 'admin'): ?>
+            <a class="nav__link <?php echo $activeNav === 'tables' ? 'is-active' : ''; ?>" href="tables.php">Tables</a>
+            <a class="nav__link <?php echo $activeNav === 'vip_tables' ? 'is-active' : ''; ?>" href="vip_tables.php">VIP Table With Karaoke</a>
+            <a class="nav__link <?php echo $activeNav === 'reservations' ? 'is-active' : ''; ?>" href="reservations.php">Reservations</a>
+            <a class="nav__link <?php echo $activeNav === 'kubo' ? 'is-active' : ''; ?>" href="kubo.php">Kubo</a>
+          <?php endif; ?>
           <a class="nav__link <?php echo $activeNav === 'customers' ? 'is-active' : ''; ?>" href="customers.php">Customers</a>
           <?php if ($role === 'admin'): ?>
             <a class="nav__link <?php echo $activeNav === 'transactions' ? 'is-active' : ''; ?>" href="transactions.php">Transactions</a>
@@ -149,11 +151,11 @@ function render_footer(): void
       </div>
     </div>
 
-    <!-- 10-Mins Warning Alert Modal (Global) -->
+    <!-- 5-Mins Warning Alert Modal (Global) -->
     <div id="globalWarningModal" class="global-modal" style="display:none;" onclick="if(event.target.id==='globalWarningModal')closeGlobalWarningModal()">
       <div class="global-modal__box">
         <div class="global-modal__header" style="background:#f59e0b;" id="globalWarnHeader">
-          <h3 style="color:white; margin:0; display:flex; align-items:center; gap:8px;" id="globalWarnTitle">⏳ 10 Mins Remaining</h3>
+          <h3 style="color:white; margin:0; display:flex; align-items:center; gap:8px;" id="globalWarnTitle">⏳ 5 Mins Remaining</h3>
           <span class="global-modal__close" onclick="closeGlobalWarningModal()">&times;</span>
         </div>
         <div class="global-modal__body">
@@ -267,6 +269,7 @@ function render_footer(): void
       }
 
       let globalAlertedSessions = new Set();
+      // Using localStorage so it doesn't pop up again even if they refresh the page
       let globalAlertedWarnings = new Set();
 
       function closeGlobalTimeoutModal() {
@@ -283,15 +286,23 @@ function render_footer(): void
           .then(data => {
             if (data.status === 'ok') {
                // Handle warnings 
+               // Clean up warned_ keys when a session has expired OR was manually ended
+               const toClean = [...(data.expired || []), ...(data.ended || [])];
+               if (toClean.length > 0) {
+                 toClean.forEach(s => localStorage.removeItem('warned_' + s.session_id));
+               }
+
                if (data.warnings && data.warnings.length > 0) {
                  data.warnings.forEach(w => {
-                   if (!globalAlertedWarnings.has(w.session_id)) {
+                   const warnKey = 'warned_' + w.session_id;
+                   if (!globalAlertedWarnings.has(w.session_id) && !localStorage.getItem(warnKey)) {
                       globalAlertedWarnings.add(w.session_id);
+                      localStorage.setItem(warnKey, '1'); // save to browser storage
                       playGlobalWarningSound();
                       
                       const isKuboKaraoke = w.type === 'kubo';
                       const warnLabel = isKuboKaraoke ? '🎤 Karaoke:' : 'Table:';
-                      const warnTitle = isKuboKaraoke ? '🎤 Karaoke - 10 Mins Remaining' : '⏳ 10 Mins Remaining';
+                      const warnTitle = isKuboKaraoke ? '🎤 Karaoke - 5 Mins Remaining' : '⏳ 5 Mins Remaining';
                       const warnIcon = isKuboKaraoke ? '🎤' : '⚠️';
                       
                       document.getElementById('globalWarnTitle').textContent = warnTitle;

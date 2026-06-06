@@ -131,8 +131,8 @@ $mostUsed = db()->query("
   LIMIT 10
 ")->fetchAll();
 
-$dtFrom = (string)($_GET['dt_from'] ?? date('Y-m-d'));
-$dtTo = (string)($_GET['dt_to'] ?? date('Y-m-d'));
+$dtFrom = date('Y-m-d'); // Dead time always uses today
+$dtTo = date('Y-m-d');   // Dead time always uses today
 $dtStart = (string)($_GET['dt_start'] ?? $savedDtStart);
 $dtEnd = (string)($_GET['dt_end'] ?? $savedDtEnd);
 
@@ -407,17 +407,11 @@ function exportGrossIncome(type) {
 
     <div class="card col-6">
       <div class="card__title">Dead Time Summary</div>
-      <div style="margin-top:6px;color:var(--muted);">Compute inactive hours per table.</div>
+      <div style="margin-top:6px;color:var(--muted);">Compute inactive hours per table for today. Adjust operating hours below.</div>
       
       <form method="get" action="reports.php" class="row" style="margin-top:12px; gap:10px; align-items:flex-end;">
-        <div class="field" style="flex:1;">
-          <div class="label">From Date</div>
-          <input type="date" name="dt_from" value="<?php echo h($dtFrom); ?>">
-        </div>
-        <div class="field" style="flex:1;">
-          <div class="label">To Date</div>
-          <input type="date" name="dt_to" value="<?php echo h($dtTo); ?>">
-        </div>
+        <input type="hidden" name="dt_from" value="<?php echo h(date('Y-m-d')); ?>">
+        <input type="hidden" name="dt_to" value="<?php echo h(date('Y-m-d')); ?>">
         <div class="field" style="flex:1;">
           <div class="label">Op. Start</div>
           <input type="time" name="dt_start" id="dtOpStart" value="<?php echo h($dtStart); ?>">
@@ -430,11 +424,15 @@ function exportGrossIncome(type) {
           <button class="btn" type="submit">Filter</button>
         </div>
       </form>
-      <div id="dtSaveStatus" style="margin-top:6px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
+      <div style="margin-top:6px; font-size:11px; color:var(--muted);">
+        📅 Showing: <strong>Today (<?php echo date('M j, Y'); ?>)</strong> &nbsp;|&nbsp;
+        ⏰ <?php echo date('g:i A', strtotime($dtStart)); ?> – <?php echo date('g:i A', strtotime($dtEnd)); ?>
+      </div>
+      <div id="dtSaveStatus" style="margin-top:4px; font-size:11px; color:#22c55e; display:none;">✓ Saved</div>
 
       <form method="get" action="exports/export_deadtime.php" style="margin-top:8px;">
-        <input type="hidden" name="dt_from" value="<?php echo h($dtFrom); ?>">
-        <input type="hidden" name="dt_to" value="<?php echo h($dtTo); ?>">
+        <input type="hidden" name="dt_from" value="<?php echo h(date('Y-m-d')); ?>">
+        <input type="hidden" name="dt_to" value="<?php echo h(date('Y-m-d')); ?>">
         <input type="hidden" name="dt_start" value="<?php echo h($dtStart); ?>">
         <input type="hidden" name="dt_end" value="<?php echo h($dtEnd); ?>">
         <button class="btn btn--ghost btn--block" type="submit">📥 Export to Excel</button>

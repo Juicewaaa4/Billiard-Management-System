@@ -118,6 +118,49 @@
 @keyframes modalIn { from { opacity:0; transform:scale(0.92) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
 </style>
 
+<!-- Void Game Modal -->
+<div id="voidModal" class="game-modal" style="display:none;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>🗑️ Void Game — <span id="voidTableName"></span></h3>
+      <span class="game-modal__close" onclick="closeVoidModal()">&times;</span>
+    </div>
+    <div class="game-modal__body">
+      <input type="hidden" id="voidSessionId">
+      <div class="game-modal__field">
+        <label>Reason for voiding</label>
+        <input type="text" id="voidReasonInput" placeholder="e.g. Test game, wrong table..." style="width:100%;">
+      </div>
+      <div class="game-modal__footer" style="margin-top:20px;">
+        <button type="button" class="btn btn--ghost" onclick="closeVoidModal()">Cancel</button>
+        <button type="button" class="btn btn--danger" onclick="submitVoid()">Void Game</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loyalty Modal -->
+<div id="loyaltyModal" class="game-modal" style="display:none;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>⭐ Add Loyalty Game — <span id="loyaltyTableName"></span></h3>
+      <span class="game-modal__close" onclick="closeLoyaltyModal()">&times;</span>
+    </div>
+    <div class="game-modal__body" style="text-align:center;">
+      <p style="margin:0 0 16px;">This will deduct <strong>10 completed games</strong> from the customer's loyalty balance and add <strong>1 FREE hour</strong> to this session.</p>
+      <div class="game-modal__footer" style="justify-content:center;">
+        <button type="button" class="btn btn--ghost" onclick="closeLoyaltyModal()">Cancel</button>
+        <button type="button" class="btn btn--primary" style="background:#f59e0b; border-color:#f59e0b;" onclick="submitLoyalty()">Apply Loyalty</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<form id="loyaltyForm" method="post" style="display:none;" action="tables.php">
+  <input type="hidden" name="return_url" value="dashboard.php">
+  <input type="hidden" name="action" value="add_loyalty">
+  <input type="hidden" name="session_id" id="loyalty_session_id">
+</form>
 <script>
 // Dashboard Modals specifically targeting correct form action endpoints
 let extendSessionId = 0, extendRate = 0, extendHours = 0, extendInterval = null, currentTableType = 'regular';
@@ -204,12 +247,68 @@ function submitEnd() {
   document.getElementById('endForm').submit();
 }
 
+let loyaltySessionId = 0;
+function openLoyaltyModal(sessionId, tableName, type) {
+  loyaltySessionId = sessionId;
+  setFormActions(type);
+  document.getElementById('loyaltyTableName').textContent = tableName;
+  document.getElementById('loyaltyModal').style.display = 'flex';
+}
+function closeLoyaltyModal() { document.getElementById('loyaltyModal').style.display = 'none'; }
+function submitLoyalty() {
+  document.getElementById('loyalty_session_id').value = loyaltySessionId;
+  document.getElementById('loyaltyForm').submit();
+}
+
+function voidGame(sessionId, tableName) {
+  document.getElementById('voidSessionId').value = sessionId;
+  document.getElementById('voidTableName').textContent = tableName;
+  document.getElementById('voidReasonInput').value = '';
+  document.getElementById('voidModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('voidReasonInput').focus(), 100);
+}
+function closeVoidModal() { document.getElementById('voidModal').style.display = 'none'; }
+function submitVoid() {
+  const sessionId = document.getElementById('voidSessionId').value;
+  const reason = document.getElementById('voidReasonInput').value.trim();
+
+  if (reason === '') {
+    showWarnModal('⚠️ Reason Required', 'You need to write a reason to void the session!');
+    document.getElementById('voidReasonInput').focus();
+    return;
+  }
+
+  const formData = new URLSearchParams();
+  formData.append('session_id', sessionId);
+  formData.append('void_reason', reason);
+
+  fetch('api/api_void_game.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formData.toString()
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'Failed to void session'));
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Network error occurred.');
+    });
+}
+
 // Close modals on backdrop click
-['extendModal','endModal'].forEach(id => {
+['extendModal','endModal','voidModal','loyaltyModal'].forEach(id => {
   document.getElementById(id).addEventListener('click', e => {
     if (e.target.id === id) {
       if (id === 'extendModal') closeExtendModal();
-      else closeEndModal();
+      else if (id === 'endModal') closeEndModal();
+      else if (id === 'voidModal') closeVoidModal();
+      else if (id === 'loyaltyModal') closeLoyaltyModal();
     }
   });
 });

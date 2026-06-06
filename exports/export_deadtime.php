@@ -139,7 +139,7 @@ foreach ($daysList as $dayIdx => $day) {
 
     foreach ($groups as $gi => $group) {
         $isLastGroup = ($gi === count($groups) - 1);
-        $colCount    = count($group) * 2;
+        $colCount    = count($group); // one col per table (time range only)
         $showBreakdown = $isLastGroup && $isLastDay;
         $totalCols   = $showBreakdown ? $colCount + 4 : $colCount;
 
@@ -155,12 +155,13 @@ foreach ($daysList as $dayIdx => $day) {
         echo "<tr>";
         foreach ($group as $t) {
             $name = strtoupper($t['table_number']);
-            echo "<td style='{$hdrStyle} min-width:140px;'>{$name}</td>";
-            echo "<td style='{$hdrStyle} min-width:85px;'>HOUR/MINS</td>";
+            echo "<td style='{$hdrStyle} min-width:180px;'>{$name}</td>";
         }
         if ($showBreakdown) {
             echo "<td style='{$emptyBdr}' width='20'></td>";
-            echo "<td colspan='3' style='{$brkHdrStyle}'>BILLIARDS BREAKDOWN</td>";
+            echo "<td style='{$brkHdrStyle}'></td>";
+            echo "<td style='{$brkHdrStyle}'>BILLIARDS BREAKDOWN</td>";
+            echo "<td style='{$brkHdrStyle}'></td>";
         }
         echo "</tr>";
 
@@ -182,18 +183,16 @@ foreach ($daysList as $dayIdx => $day) {
         for ($i = 0; $i < $maxP; $i++) {
             echo "<tr>";
 
-            // Dead time slots per table
+            // Dead time slots per table (time range only)
             foreach ($group as $t) {
                 $periods = $data[(int)$t['id']];
                 if (isset($periods[$i])) {
                     $p  = $periods[$i];
                     $fr = date('h:i A', $p['from']);
                     $to = date('h:i A', $p['to']);
-                    $du = fmtDur((int)$p['dur']);
                     echo "<td style='{$cellStyle}'>{$fr} – {$to}</td>";
-                    echo "<td style='{$cellStyle}'>{$du}</td>";
                 } else {
-                    echo "<td style='border:1px solid #eee;'></td><td style='border:1px solid #eee;'></td>";
+                    echo "<td style='border:1px solid #eee;'></td>";
                 }
             }
 
@@ -201,10 +200,12 @@ foreach ($daysList as $dayIdx => $day) {
             if ($showBreakdown) {
                 echo "<td style='{$emptyBdr}'></td>";
                 if ($i < 3) {
-                    echo "<td colspan='2' style='{$brkLabel}'>{$brkRows[$i][0]}</td>";
+                    echo "<td style='{$brkLabel}'>{$brkRows[$i][0]}</td>";
+                    echo "<td style='{$brkVal}'></td>";
                     echo "<td style='{$brkVal}'>{$brkRows[$i][1]}</td>";
                 } elseif ($i === 3) {
-                    echo "<td colspan='2' style='{$totStyle}'>GRAND TOTAL</td>";
+                    echo "<td style='{$totStyle}'>GRAND TOTAL</td>";
+                    echo "<td style='{$totVal}'></td>";
                     echo "<td style='{$totVal}'>₱" . number_format($grandTotal, 2) . "</td>";
                 } else {
                     echo "<td style='{$emptyBdr}'></td><td style='{$emptyBdr}'></td><td style='{$emptyBdr}'></td>";

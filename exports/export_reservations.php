@@ -8,8 +8,8 @@ require_once __DIR__ . '/../includes/util.php';
 start_app_session();
 require_role(['admin']); // Restricted to Admin only
 
-$from = parse_date((string) ($_GET['from'] ?? date('Y-m-d')));
-$to = parse_date((string) ($_GET['to'] ?? date('Y-m-d')));
+$fromDateStr = trim((string) ($_GET['from'] ?? date('Y-m-d')));
+$toDateStr = trim((string) ($_GET['to'] ?? date('Y-m-d')));
 $status = (string) ($_GET['status'] ?? 'all');
 $shiftFilter = (string) ($_GET['shift'] ?? 'both'); // 'morning', 'evening', 'both'
 
@@ -40,6 +40,14 @@ if ($eveningStart === '')
 if ($nightEnd === '')
     $nightEnd = '02:30';
 
+$from = $fromDateStr ? date('Y-m-d H:i:s', strtotime("{$fromDateStr} {$morningStart}")) : null;
+
+$adjustedToDateStr = $toDateStr;
+if ($morningStart > $nightEnd) {
+    $adjustedToDateStr = date('Y-m-d', strtotime($toDateStr . ' +1 day'));
+}
+$to = $toDateStr ? date('Y-m-d H:i:s', strtotime("{$adjustedToDateStr} {$nightEnd}")) : null;
+
 // Convert shift start times to hour+minute for comparison
 $morningStartParts = explode(':', $morningStart);
 $morningStartMinutes = ((int) $morningStartParts[0]) * 60 + ((int) ($morningStartParts[1] ?? 0));
@@ -50,11 +58,11 @@ $eveningStartMinutes = ((int) $eveningStartParts[0]) * 60 + ((int) ($eveningStar
 $whereRes = [];
 $paramsRes = [];
 if ($from) {
-    $whereRes[] = "DATE(r.reservation_date) >= ?";
+    $whereRes[] = "r.reservation_date >= ?";
     $paramsRes[] = $from;
 }
 if ($to) {
-    $whereRes[] = "DATE(r.reservation_date) <= ?";
+    $whereRes[] = "r.reservation_date <= ?";
     $paramsRes[] = $to;
 }
 $whereResStr = count($whereRes) ? " AND " . implode(" AND ", $whereRes) : "";
@@ -72,11 +80,11 @@ $noShows = $noShowsStmt->fetchAll(PDO::FETCH_ASSOC);
 $whereGs = [];
 $paramsGs = [];
 if ($from) {
-    $whereGs[] = "DATE(gs.start_time) >= ?";
+    $whereGs[] = "gs.start_time >= ?";
     $paramsGs[] = $from;
 }
 if ($to) {
-    $whereGs[] = "DATE(gs.start_time) <= ?";
+    $whereGs[] = "gs.start_time <= ?";
     $paramsGs[] = $to;
 }
 $whereGsStr = count($whereGs) ? " AND " . implode(" AND ", $whereGs) : "";
@@ -238,10 +246,10 @@ function print_columns_header()
     echo '<tr>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Reservation ID</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Customer</th>';
-    echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Table / Room</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Time Range</th>';
-    echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Total Time</th>';
+    echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Table / Room</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Downpayment (P)</th>';
+    echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Total Time</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Total Cost (P)</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">KTV</th>';
     echo '<th style="background-color: #5cb85c; color: white; font-weight: bold; text-align: center; border: 1px solid #000;">Cashier</th>';
@@ -256,9 +264,9 @@ function print_group_rows($groupLabel, $shiftLabel, $rows, $printHeaders = false
     echo '<td style="font-weight: bold; border: 1px solid #000; text-align: center;">' . $groupLabel . '</td>';
     if ($shiftLabel !== null) {
         echo '<td style="font-weight: bold; border: 1px solid #000; text-align: center;">' . $shiftLabel . '</td>';
-        echo '<td colspan="8" style="border: 1px solid #000;"></td>';
+        echo str_repeat('<td style="border: 1px solid #000;"></td>', 8);
     } else {
-        echo '<td colspan="9" style="border: 1px solid #000;"></td>';
+        echo '<td style="border: 1px solid #000;"></td>' . str_repeat('<td style="border: 1px solid #000;"></td>', 8);
     }
     echo '</tr>';
 
@@ -267,7 +275,7 @@ function print_group_rows($groupLabel, $shiftLabel, $rows, $printHeaders = false
     }
 
     if (empty($rows)) {
-        echo '<tr><td colspan="10" style="border: 1px solid #000;"></td></tr>';
+        echo '<tr><td style="border: 1px solid #000;"></td>' . str_repeat('<td style="border: 1px solid #000;"></td>', 9) . '</tr>';
         return;
     }
 
@@ -277,10 +285,10 @@ function print_group_rows($groupLabel, $shiftLabel, $rows, $printHeaders = false
         echo '<tr>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['id']) . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['customer']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['table']) . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['time_range']) . '</td>';
-        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['total_time']) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['table']) . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . number_format($row['downpayment'], 0) . '</td>';
+        echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['total_time']) . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . number_format($row['total_cost'], 0) . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . $row['ktv'] . '</td>';
         echo '<td style="text-align: center; border: 1px solid #000; ' . $bgStyle . '">' . htmlspecialchars((string) $row['cashier']) . '</td>';
@@ -306,7 +314,8 @@ foreach ($shiftsToRender as $shift) {
 
     // 1st Row: RESERVATION + Shift info
     echo '<tr>';
-    echo '<td colspan="10" style="background-color: #dff0d8; text-align: center; font-weight: bold; border: 1px solid #000;">RESERVATION</td>';
+    echo '<td style="background-color: #dff0d8; text-align: center; font-weight: bold; border: 1px solid #000;">RESERVATION</td>';
+    echo str_repeat('<td style="background-color: #dff0d8; border: 1px solid #000;"></td>', 9);
     echo '</tr>';
 
     // Groups — print headers only once per shift
@@ -326,36 +335,36 @@ foreach ($shiftsToRender as $shift) {
     }
 
     echo '<tr>';
-    echo '<td colspan="5" style="border: none;"></td>';
+    echo str_repeat('<td style="border: none;"></td>', 5);
     echo '<td style="background-color: #fcd5b4; font-weight: bold; text-align: center; border: 1px solid #000;">TOTAL</td>';
     echo '<td style="background-color: #fcd5b4; font-weight: bold; text-align: center; border: 1px solid #000;">' . number_format($shiftTotal, 2) . '</td>';
-    echo '<td colspan="3" style="border: none;"></td>';
+    echo str_repeat('<td style="border: none;"></td>', 3);
     echo '</tr>';
 
-    echo '<tr><td colspan="10" style="border:none; height:30px;"></td></tr>';
+    echo '<tr><td style="border:none; height:30px;"></td>' . str_repeat('<td style="border:none;"></td>', 9) . '</tr>';
 }
 
 // Grand Totals at the very bottom
 echo '<tr>';
-echo '<td colspan="5" style="border: none;"></td>';
+echo str_repeat('<td style="border: none;"></td>', 5);
 echo '<td style="font-weight: bold; color: #e67e22; text-align: right; border: 1px solid #000;">VIP GRAND TOTAL:</td>';
 echo '<td style="font-weight: bold; color: #e67e22; text-align: center; border: 1px solid #000;">' . number_format($grandTotalVip, 0) . '</td>';
-echo '<td colspan="3" style="border: none;"></td>';
+echo str_repeat('<td style="border: none;"></td>', 3);
 echo '</tr>';
 
 echo '<tr>';
-echo '<td colspan="5" style="border: none;"></td>';
+echo str_repeat('<td style="border: none;"></td>', 5);
 echo '<td style="font-weight: bold; color: #e67e22; text-align: right; border: 1px solid #000;">KTV GRAND TOTAL:</td>';
 echo '<td style="font-weight: bold; color: #e67e22; text-align: center; border: 1px solid #000;">' . number_format($grandTotalKtv, 0) . '</td>';
-echo '<td colspan="3" style="border: none;"></td>';
+echo str_repeat('<td style="border: none;"></td>', 3);
 echo '</tr>';
 
 if ($grandTotalRegular > 0) {
     echo '<tr>';
-    echo '<td colspan="5" style="border: none;"></td>';
+    echo str_repeat('<td style="border: none;"></td>', 5);
     echo '<td style="font-weight: bold; color: #e67e22; text-align: right; border: 1px solid #000;">REGULAR GRAND TOTAL:</td>';
     echo '<td style="font-weight: bold; color: #e67e22; text-align: center; border: 1px solid #000;">' . number_format($grandTotalRegular, 0) . '</td>';
-    echo '<td colspan="3" style="border: none;"></td>';
+    echo str_repeat('<td style="border: none;"></td>', 3);
     echo '</tr>';
 }
 

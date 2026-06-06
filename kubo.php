@@ -35,17 +35,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         VALUES (?, ?, ?, ?, 'active', ?)
       ");
       $stmt->execute([$tableId, $custName, $payment, $date, (int)current_user()['id']]);
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', "Kubo rented to $custName.");
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'end_kubo') {
       $rentalId = (int)($_POST['rental_id'] ?? 0);
       if ($rentalId <= 0) throw new RuntimeException('Invalid rental record.');
 
+      db()->beginTransaction();
+      $k = db()->prepare("SELECT table_id FROM kubo_rentals WHERE id = ?");
+      $k->execute([$rentalId]);
+      $krow = $k->fetch();
+
       db()->prepare("UPDATE kubo_rentals SET status = 'completed', end_time = NOW() WHERE id = ? AND status = 'active'")->execute([$rentalId]);
+      
+      if ($krow) {
+        db()->prepare("UPDATE game_sessions SET end_time = NOW() WHERE table_id = ? AND end_time IS NULL AND karaoke_included = 1")->execute([$krow['table_id']]);
+      }
+      db()->commit();
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Kubo rental ended.');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'void_kubo') {
@@ -54,10 +66,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($rentalId <= 0) throw new RuntimeException('Invalid rental record.');
       if ($reason === '') throw new RuntimeException('Void reason is required.');
 
+      db()->beginTransaction();
+      $k = db()->prepare("SELECT table_id FROM kubo_rentals WHERE id = ?");
+      $k->execute([$rentalId]);
+      $krow = $k->fetch();
+
       // Mark as completed but set is_voided to 1
       db()->prepare("UPDATE kubo_rentals SET status = 'completed', end_time = NOW(), is_voided = 1, void_reason = ? WHERE id = ? AND status = 'active'")->execute([$reason, $rentalId]);
+
+      if ($krow) {
+        db()->prepare("UPDATE game_sessions SET end_time = NOW(), is_voided = 1, void_reason = ? WHERE table_id = ? AND end_time IS NULL AND karaoke_included = 1")->execute([$reason, $krow['table_id']]);
+      }
+      db()->commit();
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Kubo rental voided successfully.');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'start_karaoke') {
@@ -99,8 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ")->execute([$sessionId, $payment, $change, (int)current_user()['id']]);
 
       db()->commit();
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Karaoke started (' . $hours . 'h).');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'extend_karaoke') {
@@ -140,16 +164,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ")->execute([$sessionId, $payment, $change, (int)current_user()['id']]);
 
       db()->commit();
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Karaoke extended by ' . $hours . 'h.');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'end_karaoke') {
       $sessionId = (int)($_POST['session_id'] ?? 0);
       if ($sessionId <= 0) throw new RuntimeException('Invalid session.');
       db()->prepare("UPDATE game_sessions SET end_time = NOW() WHERE id = ?")->execute([$sessionId]);
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Karaoke session ended.');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'void_karaoke') {
@@ -159,8 +185,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($reason === '') throw new RuntimeException('Void reason is required.');
       
       db()->prepare("UPDATE game_sessions SET end_time = NOW(), is_voided = 1, void_reason = ? WHERE id = ?")->execute([$reason, $sessionId]);
+      $returnUrl = (string)($_POST['return_url'] ?? 'kubo.php');
       flash_set('ok', 'Karaoke session voided successfully.');
-      redirect('kubo.php');
+      redirect($returnUrl);
     }
 
     // Admin Actions

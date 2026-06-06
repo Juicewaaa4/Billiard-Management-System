@@ -13,6 +13,26 @@ header('Pragma: no-cache');
 start_app_session();
 require_role(['admin', 'cashier']);
 
+// ── AJAX: Get booked slots for a table+date (for live availability in modal) ──
+if (($_GET['ajax'] ?? '') === 'table_slots') {
+  header('Content-Type: application/json');
+  $tid  = (int)($_GET['table_id'] ?? 0);
+  $date = (string)($_GET['date'] ?? '');
+  if ($tid > 0 && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    $s = db()->prepare("
+      SELECT r.id, r.customer_name, r.start_time, r.duration_hours, r.status
+      FROM reservations r
+      WHERE r.table_id = ? AND r.reservation_date = ? AND r.status IN ('pending','started')
+      ORDER BY r.start_time ASC
+    ");
+    $s->execute([$tid, $date]);
+    echo json_encode(['slots' => $s->fetchAll(PDO::FETCH_ASSOC)]);
+  } else {
+    echo json_encode(['slots' => []]);
+  }
+  exit;
+}
+
 // ── Auto-create settings table & load shift times ──
 try {
   db()->exec("
@@ -66,6 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
 // ── POST Actions ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = (string)($_POST['action'] ?? '');
+  $returnUrl = (string)($_POST['return_url'] ?? 'reservations.php');
 
   try {
     if ($action === 'add_reservation') {
@@ -85,15 +106,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($durHours <= 0) throw new RuntimeException('Duration must be at least 30 minutes.');
 
       // Check for overlapping reservations on same table
-      $endTime = date('H:i:s', strtotime($resTime) + (int)($durHours * 3600));
+      $resDatetime = $resDate . ' ' . $resTime;
+      $endDatetime = date('Y-m-d H:i:s', strtotime($resDatetime) + (int)($durHours * 3600));
       $overlap = db()->prepare("
         SELECT id FROM reservations
         WHERE table_id = ? AND reservation_date = ? AND status IN ('pending')
         AND (
-          (start_time < ? AND ADDTIME(start_time, SEC_TO_TIME(duration_hours * 3600)) > ?)
+          (start_time < TIME(?) AND ADDTIME(start_time, SEC_TO_TIME(duration_hours * 3600)) > TIME(?))
         )
       ");
-      $overlap->execute([$tableId, $resDate, $endTime, $resTime]);
+      $overlap->execute([$tableId, $resDate, $endDatetime, $resDatetime]);
       if ($overlap->fetch()) {
         throw new RuntimeException('This table already has a reservation that overlaps with this time slot.');
       }
@@ -104,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ");
       $stmt->execute([$tableId, $custName, $custContact ?: null, $resDate, $resTime, $durHours, $downPayment, $notes ?: null, (int)current_user()['id']]);
       flash_set('ok', 'Reservation added! Down payment: ₱' . number_format($downPayment, 2));
-      redirect('reservations.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'cancel_reservation') {
@@ -118,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       db()->prepare("UPDATE reservations SET status = 'cancelled' WHERE id = ?")->execute([$id]);
       flash_set('ok', 'Reservation cancelled.');
-      redirect('reservations.php');
+      redirect($returnUrl);
     }
 
     if ($action === 'no_show') {
@@ -126,12 +148,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($id <= 0) throw new RuntimeException('Invalid reservation.');
       db()->prepare("UPDATE reservations SET status = 'no_show' WHERE id = ? AND status = 'pending'")->execute([$id]);
       flash_set('ok', 'Marked as no-show.');
-      redirect('reservations.php');
+      redirect($returnUrl);
     }
 
   } catch (Throwable $e) {
     flash_set('danger', $e->getMessage());
-    redirect('reservations.php');
+    redirect($returnUrl);
   }
 }
 
@@ -181,7 +203,7 @@ render_header('Reservations', 'reservations');
     </div>
     <div class="spacer"></div>
     <div style="display:flex; gap:10px;">
-      <button class="btn" type="button" onclick="document.getElementById('addResModal').style.display='flex'">+ Add Reservation</button>
+      <button class="btn" type="button" onclick="openAddResModal()">+ Add Reservation</button>
     </div>
   </div>
 
@@ -293,6 +315,7 @@ render_header('Reservations', 'reservations');
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; margin-bottom:10px;">
           <div><span style="color:var(--muted);">Customer:</span><br><strong><?php echo h($r['customer_name']); ?></strong></div>
           <div><span style="color:var(--muted);">Contact:</span><br><strong><?php echo h($r['customer_contact'] ?? '—'); ?></strong></div>
+          <div><span style="color:var(--muted);">Date:</span><br><strong><?php echo date('M d, Y', strtotime($r['reservation_date'])); ?></strong></div>
           <div><span style="color:var(--muted);">Time:</span><br><strong><?php echo $startFmt . ' – ' . $endFmt; ?></strong></div>
           <div><span style="color:var(--muted);">Duration:</span><br><strong><?php echo $r['duration_hours']; ?>hr</strong></div>
         </div>
@@ -371,23 +394,43 @@ render_header('Reservations', 'reservations');
           </div>
         </div>
 
+        <!-- Live Booked Slots Panel -->
+        <div id="bookedSlotsPanel" style="display:none; margin-top:12px; padding:10px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border);">
+          <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:6px; letter-spacing:.5px;">📋 Existing Reservations on this Date</div>
+          <div id="bookedSlotsList"></div>
+        </div>
+
         <div class="game-modal__row" style="margin-top:12px;">
           <div class="game-modal__field">
             <label>Start Time *</label>
-            <input type="time" name="start_time" required>
+            <input type="time" id="resStartTime" name="start_time" required>
           </div>
           <div class="game-modal__field">
             <label>Duration (hrs)</label>
-            <select name="duration_hours" required>
+            <select id="resDuration" name="duration_hours" required>
               <option value="0.5">30 min</option>
               <option value="1" selected>1 hr</option>
+              <option value="1.5">1.5 hrs</option>
               <option value="2">2 hrs</option>
+              <option value="2.5">2.5 hrs</option>
               <option value="3">3 hrs</option>
+              <option value="3.5">3.5 hrs</option>
               <option value="4">4 hrs</option>
+              <option value="4.5">4.5 hrs</option>
               <option value="5">5 hrs</option>
+              <option value="6">6 hrs</option>
+              <option value="7">7 hrs</option>
+              <option value="8">8 hrs</option>
+              <option value="9">9 hrs</option>
+              <option value="10">10 hrs</option>
+              <option value="11">11 hrs</option>
+              <option value="12">12 hrs</option>
             </select>
           </div>
         </div>
+
+        <!-- Conflict Warning -->
+        <div id="conflictWarning" style="display:none; margin-top:8px; padding:8px 12px; border-radius:7px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); font-size:12px; color:#ef4444; font-weight:600;"></div>
 
         <div class="game-modal__row" style="margin-top:12px;">
           <div class="game-modal__field">
@@ -402,7 +445,7 @@ render_header('Reservations', 'reservations');
       </div>
       <div style="padding:0 20px 20px; display:flex; gap:10px; justify-content:flex-end;">
         <button type="button" class="btn btn--ghost" onclick="document.getElementById('addResModal').style.display='none'">Cancel</button>
-        <button type="submit" class="btn btn--primary">Save Reservation</button>
+        <button type="submit" id="saveResBtn" class="btn btn--primary">Save Reservation</button>
       </div>
     </form>
   </div>
@@ -469,25 +512,20 @@ render_header('Reservations', 'reservations');
 </style>
 
 <script>
-// Cancel Reservation Modal
+// ── Cancel / No-show modals ──
 function openCancelModal(id, customerName) {
   document.getElementById('cancel_res_id').value = id;
   document.getElementById('cancelCustomerName').textContent = customerName;
   document.getElementById('cancelModal').style.display = 'flex';
 }
-function closeCancelModal() {
-  document.getElementById('cancelModal').style.display = 'none';
-}
+function closeCancelModal() { document.getElementById('cancelModal').style.display = 'none'; }
 
-// No Show Modal
 function openNoShowModal(id, customerName) {
   document.getElementById('noshow_res_id').value = id;
   document.getElementById('noshowCustomerName').textContent = customerName;
   document.getElementById('noShowModal').style.display = 'flex';
 }
-function closeNoShowModal() {
-  document.getElementById('noShowModal').style.display = 'none';
-}
+function closeNoShowModal() { document.getElementById('noShowModal').style.display = 'none'; }
 
 // Format time to 12-hour AM/PM
 function formatTime12(timeStr) {
@@ -495,6 +533,169 @@ function formatTime12(timeStr) {
   const ampm = h >= 12 ? 'PM' : 'AM';
   const hr = h % 12 || 12;
   return hr + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+// ── Live Availability: Booked Slots in Modal ──
+let currentSlots = [];
+
+function timeToMins(t) { // "HH:MM:SS" or "HH:MM" → minutes from midnight
+  const parts = t.split(':').map(Number);
+  return parts[0] * 60 + parts[1];
+}
+
+function minsToTime12(m) {
+  const h = Math.floor(m / 60) % 24;
+  const mn = m % 60;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return (h % 12 || 12) + ':' + String(mn).padStart(2, '0') + ' ' + ampm;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fetchBookedSlots() {
+  const tableEl = document.querySelector('#addResModal select[name="table_id"]');
+  const dateEl  = document.querySelector('#addResModal input[name="reservation_date"]');
+  const panel   = document.getElementById('bookedSlotsPanel');
+  const list    = document.getElementById('bookedSlotsList');
+  if (!tableEl || !dateEl) return;
+  const tid  = tableEl.value;
+  const date = dateEl.value;
+  if (!tid || !date) { panel.style.display = 'none'; currentSlots = []; checkConflict(); return; }
+
+  fetch('reservations.php?ajax=table_slots&table_id=' + encodeURIComponent(tid) + '&date=' + encodeURIComponent(date))
+    .then(r => r.json())
+    .then(data => {
+      currentSlots = data.slots || [];
+      let html = '';
+      if (currentSlots.length === 0) {
+        html += '<div style="color:#22c55e; font-size:12px; margin-bottom:8px;">✓ Walang naka-reserve sa araw na ito.</div>';
+      } else {
+        currentSlots.forEach(s => {
+          const startMins = timeToMins(s.start_time);
+          const endMins   = startMins + Math.round(parseFloat(s.duration_hours) * 60);
+          html += `<div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:5px 8px; margin-bottom:4px; background:rgba(239,68,68,0.08); border-radius:6px; border-left:3px solid #ef4444;">
+            <div>
+              <strong>${minsToTime12(startMins)} – ${minsToTime12(endMins)}</strong>
+              &nbsp;·&nbsp; ${escHtml(s.customer_name)}
+            </div>
+            <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(239,68,68,0.15); color:#ef4444; text-transform:uppercase;">${escHtml(s.status)}</span>
+          </div>`;
+        });
+      }
+        // Compute free gaps based on Shift (8:00 AM to 2:30 AM next day)
+        const SHIFT_START = 8 * 60; // 480
+        const SHIFT_END = 24 * 60 + 150; // 1590 (2:30 AM next day)
+        
+        function toShiftMins(tStr) {
+           let m = timeToMins(tStr);
+           return m < 480 ? m + 1440 : m; // treat 12am-7:59am as "next day" for the shift
+        }
+
+        let gaps = [];
+        let prev = SHIFT_START;
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+        
+        if (date === todayStr) {
+           const currMins = now.getHours() * 60 + now.getMinutes();
+           let currShiftMins = currMins < 480 ? currMins + 1440 : currMins;
+           // Round up to the nearest 30 mins (e.g. 10:14 AM -> 10:30 AM)
+           currShiftMins = Math.ceil(currShiftMins / 30) * 30;
+           prev = Math.max(prev, currShiftMins);
+        }
+        
+        const sorted = [...currentSlots];
+        sorted.sort((a,b) => toShiftMins(a.start_time) - toShiftMins(b.start_time));
+
+        sorted.forEach(s => {
+          const sm = toShiftMins(s.start_time);
+          const em = sm + Math.round(parseFloat(s.duration_hours) * 60);
+          if (sm > prev) gaps.push([prev, sm]);
+          prev = Math.max(prev, em);
+        });
+        
+        if (prev < SHIFT_END) gaps.push([prev, SHIFT_END]);
+        
+        if (gaps.length > 0) {
+          html += '<div style="font-size:11px; font-weight:700; color:var(--muted); margin:8px 0 4px;">🟢 Available Time Slots:</div>';
+          gaps.forEach(([s, e]) => {
+            const label = minsToTime12(s) + ' – ' + (e === SHIFT_END ? '2:30 AM' : minsToTime12(e));
+            html += `<div style="font-size:12px; padding:4px 8px; margin-bottom:3px; background:rgba(34,197,94,0.08); border-radius:5px; border-left:3px solid #22c55e; color:#16a34a;">${label}</div>`;
+          });
+        }
+        list.innerHTML = html;
+      panel.style.display = 'block';
+      checkConflict();
+    })
+    .catch(() => { panel.style.display = 'none'; currentSlots = []; });
+}
+
+// Check if entered time+duration conflicts with any existing reservation
+function checkConflict() {
+  const startEl = document.getElementById('resStartTime');
+  const durEl   = document.getElementById('resDuration');
+  const warn    = document.getElementById('conflictWarning');
+  const btn     = document.getElementById('saveResBtn');
+  if (!startEl || !durEl || !warn) return;
+
+  const startVal = startEl.value;
+  const durVal   = parseFloat(durEl.value || 0);
+  if (!startVal || !durVal || currentSlots.length === 0) {
+    warn.style.display = 'none';
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  const newStart = timeToMins(startVal);
+  const newEnd   = newStart + Math.round(durVal * 60);
+
+  const conflict = currentSlots.find(s => {
+    const sm = timeToMins(s.start_time);
+    const em = sm + Math.round(parseFloat(s.duration_hours) * 60);
+    // overlap: new slot starts before existing ends AND new slot ends after existing starts
+    return newStart < em && newEnd > sm;
+  });
+
+  if (conflict) {
+    const csm = timeToMins(conflict.start_time);
+    const cem = csm + Math.round(parseFloat(conflict.duration_hours) * 60);
+    warn.textContent = '⛔ Conflict! ' + escHtml(conflict.customer_name) + ' already reserved from ' + minsToTime12(csm) + ' to ' + minsToTime12(cem) + '. Please choose a different time.';
+    warn.style.display = 'block';
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  } else {
+    warn.style.display = 'none';
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
+// Attach listeners on modal inputs
+document.addEventListener('DOMContentLoaded', function() {
+  const tableEl = document.querySelector('#addResModal select[name="table_id"]');
+  const dateEl  = document.querySelector('#addResModal input[name="reservation_date"]');
+  const startEl = document.getElementById('resStartTime');
+  const durEl   = document.getElementById('resDuration');
+  if (tableEl) tableEl.addEventListener('change', fetchBookedSlots);
+  if (dateEl)  dateEl.addEventListener('change',  fetchBookedSlots);
+  if (startEl) startEl.addEventListener('change', checkConflict);
+  if (startEl) startEl.addEventListener('input',  checkConflict);
+  if (durEl)   durEl.addEventListener('change',   checkConflict);
+});
+
+// Reset modal state when opened
+function openAddResModal() {
+  currentSlots = [];
+  const panel = document.getElementById('bookedSlotsPanel');
+  const warn  = document.getElementById('conflictWarning');
+  if (panel) panel.style.display = 'none';
+  if (warn)  warn.style.display  = 'none';
+  const btn = document.getElementById('saveResBtn');
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  document.getElementById('addResModal').style.display = 'flex';
 }
 
 // Update shift labels when time inputs change

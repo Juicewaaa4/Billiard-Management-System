@@ -173,18 +173,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       db()->beginTransaction();
       db()->prepare("UPDATE tables SET status='in_use' WHERE id=?")->execute([$tableId]);
 
+      $actualStartTime = date('Y-m-d H:i:s');
+      if ($resId > 0 && is_array($rvRow)) {
+         $rvDate = $rvRow['reservation_date'] . ' ' . $rvRow['start_time'];
+         if (strtotime($rvDate) <= time() && $rvRow['reservation_date'] === date('Y-m-d')) {
+            $actualStartTime = date('Y-m-d H:i:s', strtotime($rvDate));
+         }
+      }
+      $scheduledEndTime = date('Y-m-d H:i:s', strtotime($actualStartTime) + (int)($hours * 3600));
+
       $ins = db()->prepare("
         INSERT INTO game_sessions
           (table_id, customer_id, walk_in_name, rate_per_hour, start_time, scheduled_end_time, hours_purchased, total_amount, duration_seconds, games_earned, games_redeemed, created_by, is_promo, reservation_id, down_payment)
         VALUES
-          (?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?, ?, ?, 0, 0, ?, ?, ?, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
       ");
       $ins->execute([
         $tableId,
         $customerId,
         $customerId ? null : $walkInName,
         $rate,
-        (int)($hours * 3600),
+        $actualStartTime,
+        $scheduledEndTime,
         $hours,
         $total,
         (int)($hours * 3600),
@@ -397,13 +407,13 @@ foreach ($activeSessions as $s) {
 }
 $busyCustomerIds = array_values(array_unique($busyCustomerIds));
 
-// Upcoming reservations per table (today, pending only)
+// Upcoming reservations per table (pending only)
 $resStmt = db()->query("
   SELECT r.*, t.table_number
   FROM reservations r
   JOIN tables t ON t.id = r.table_id
-  WHERE r.reservation_date = CURDATE() AND r.status = 'pending' AND t.type = 'regular'
-  ORDER BY r.start_time ASC
+  WHERE r.reservation_date >= CURDATE() AND r.status = 'pending' AND t.type = 'regular'
+  ORDER BY r.reservation_date ASC, r.start_time ASC
 ");
 $allReservations = $resStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -419,7 +429,8 @@ foreach ($allReservations as $rv) {
 // Compute max hours for walk-ins per table (based on next reservation)
 $maxHoursByTable = [];
 foreach ($nextResByTable as $tid => $rv) {
-  $resStartTs = strtotime(date('Y-m-d') . ' ' . $rv['start_time']);
+  // Use the actual reservation_date (not just today) so future-day reservations compute correctly
+  $resStartTs = strtotime($rv['reservation_date'] . ' ' . $rv['start_time']);
   $nowTs = time();
   if ($resStartTs > $nowTs) {
     $diffHours = ($resStartTs - $nowTs) / 3600;
@@ -525,12 +536,19 @@ render_header('Tables', 'tables');
       $hasRes = isset($nextResByTable[$tid]);
       $maxH = $maxHoursByTable[$tid] ?? 99;
       $resInfo = $hasRes ? $nextResByTable[$tid] : null;
-      $resTimeFmt = $hasRes ? date('h:i A', strtotime($resInfo['start_time'])) : '';
+      // Show date+time when reservation is not today
+      $resTimeFmt = '';
+      $resDateLabel = '';
+      if ($hasRes) {
+        $resTimeFmt = date('h:i A', strtotime($resInfo['start_time']));
+        $resIsToday = ($resInfo['reservation_date'] === date('Y-m-d'));
+        $resDateLabel = $resIsToday ? '' : date('M j', strtotime($resInfo['reservation_date']));
+      }
       
       // Calculate max extension hours if active
       $maxExtH = 99;
       if ($active && $hasRes && !empty($active['scheduled_end_time'])) {
-          $resStartTs = strtotime(date('Y-m-d') . ' ' . $resInfo['start_time']);
+          $resStartTs = strtotime($resInfo['reservation_date'] . ' ' . $resInfo['start_time']);
           $schedEndTs = strtotime($active['scheduled_end_time']);
           $diffH = ($resStartTs - $schedEndTs) / 3600;
           $maxExtH = max(0, round($diffH * 2) / 2);
@@ -567,7 +585,7 @@ render_header('Tables', 'tables');
           <!-- Active Game Info -->
           <?php if ($hasRes): ?>
             <div style="padding:6px 10px; margin-bottom:10px; background:linear-gradient(90deg, rgba(56,189,248,0.08), rgba(56,189,248,0.02)); border-radius:6px; border:1px solid rgba(56,189,248,0.2);">
-              <span style="color:#38bdf8; font-size:12px; font-weight:700;">📅 Reserved at <?php echo $resTimeFmt; ?> (Up Next)</span>
+              <span style="color:#38bdf8; font-size:12px; font-weight:700;">📅 Reserved <?php echo $resDateLabel ? $resDateLabel . ', ' : ''; ?>at <?php echo $resTimeFmt; ?> (Up Next)</span>
               <span style="display:block; color:var(--muted); font-size:11px; margin-top:2px;">
                 <?php echo h($resInfo['customer_name']); ?> · <?php echo $resInfo['duration_hours']; ?>hr
                 <?php if ((float)$resInfo['down_payment'] > 0): ?>
@@ -642,7 +660,7 @@ render_header('Tables', 'tables');
 
           <?php if ($hasRes): ?>
             <div style="padding:6px 10px; margin-bottom:10px; background:linear-gradient(90deg, rgba(56,189,248,0.08), rgba(56,189,248,0.02)); border-radius:6px; border:1px solid rgba(56,189,248,0.2);">
-              <span style="color:#38bdf8; font-size:12px; font-weight:700;">📅 Reserved at <?php echo $resTimeFmt; ?></span>
+              <span style="color:#38bdf8; font-size:12px; font-weight:700;">📅 Reserved <?php echo $resDateLabel ? $resDateLabel . ', ' : ''; ?>at <?php echo $resTimeFmt; ?></span>
               <span style="display:block; color:var(--muted); font-size:11px; margin-top:2px;">
                 <?php echo h($resInfo['customer_name']); ?> · <?php echo $resInfo['duration_hours']; ?>hr
                 <?php if ((float)$resInfo['down_payment'] > 0): ?>
@@ -656,24 +674,29 @@ render_header('Tables', 'tables');
             <div style="color:var(--muted); font-size:13px; margin-bottom:8px;">
               ₱<?php echo number_format((float) $t['rate_per_hour'], 2); ?>/hr</div>
 
-            <?php if ($hasRes && $maxH <= 0): ?>
-              <!-- Reservation time now or passed - show start reservation button -->
+            <?php if ($hasRes && $maxH <= 0 && $resInfo['reservation_date'] === date('Y-m-d')): ?>
+              <!-- Reservation time now or passed (today only) - show start reservation button -->
               <a class="btn btn--primary" style="width:100%; text-decoration:none; text-align:center;"
                  href="tables.php?start_reservation=<?php echo (int)$resInfo['id']; ?>">
                 ▶️ Start Reservation
               </a>
-            <?php elseif ($hasRes && $maxH > 0): ?>
-              <!-- Walk-in allowed but limited hours -->
+            <?php elseif ($hasRes && $maxH > 0 && $resInfo['reservation_date'] === date('Y-m-d')): ?>
+              <!-- Walk-in allowed but limited hours (today reservation) -->
               <div style="color:#f59e0b; font-size:11px; margin-bottom:6px; font-weight:600;">
-                ⚠️ Max <?php echo $maxH; ?>hr allowed (reserved at <?php echo $resTimeFmt; ?>)
+                ⚠️ Max <?php echo $maxH; ?>hr allowed (reserved today at <?php echo $resTimeFmt; ?>)
               </div>
               <button class="btn" type="button" style="width:100%;"
-                onclick="openStartModal(<?php echo $tid; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float) $t['rate_per_hour']; ?>, <?php echo $maxH; ?>)">Start
-                Game</button>
+                onclick="openStartModal(<?php echo $tid; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float) $t['rate_per_hour']; ?>, <?php echo $maxH; ?>)">Start Game</button>
+            <?php elseif ($hasRes && $resInfo['reservation_date'] !== date('Y-m-d')): ?>
+              <!-- Future reservation - no restriction on walk-in hours today -->
+              <div style="color:#38bdf8; font-size:11px; margin-bottom:6px; font-weight:600;">
+                ℹ️ Reserved on <?php echo $resDateLabel; ?> at <?php echo $resTimeFmt; ?>
+              </div>
+              <button class="btn" type="button" style="width:100%;"
+                onclick="openStartModal(<?php echo $tid; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float) $t['rate_per_hour']; ?>, 0)">Start Game</button>
             <?php else: ?>
               <button class="btn" type="button" style="width:100%;"
-                onclick="openStartModal(<?php echo $tid; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float) $t['rate_per_hour']; ?>, 0)">Start
-                Game</button>
+                onclick="openStartModal(<?php echo $tid; ?>, '<?php echo h($t['table_number']); ?>', <?php echo (float) $t['rate_per_hour']; ?>, 0)">Start Game</button>
             <?php endif; ?>
           </div>
         <?php endif; ?>

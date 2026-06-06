@@ -40,12 +40,22 @@ try {
     LEFT JOIN customers c ON c.id = gs.customer_id
     WHERE gs.end_time IS NULL 
       AND gs.scheduled_end_time > NOW() 
-      AND gs.scheduled_end_time <= DATE_ADD(NOW(), INTERVAL 10 MINUTE)
+      AND gs.scheduled_end_time <= DATE_ADD(NOW(), INTERVAL 5 MINUTE)
   ");
   $stmtWarn->execute();
   $warnings = $stmtWarn->fetchAll(PDO::FETCH_ASSOC);
   
-  echo json_encode(['status' => 'ok', 'expired' => $expired, 'warnings' => $warnings]);
+  // Recently-ended sessions (manually ended, not expired) - for localStorage cleanup
+  $stmtEnded = db()->prepare("
+    SELECT gs.id AS session_id
+    FROM game_sessions gs
+    WHERE gs.end_time IS NOT NULL
+      AND gs.end_time >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
+  ");
+  $stmtEnded->execute();
+  $ended = $stmtEnded->fetchAll(PDO::FETCH_ASSOC);
+
+  echo json_encode(['status' => 'ok', 'expired' => $expired, 'warnings' => $warnings, 'ended' => $ended]);
 } catch (Exception $e) {
   echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }

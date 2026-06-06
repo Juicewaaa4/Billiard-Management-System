@@ -15,15 +15,36 @@ $flash = flash_get();
 
 
 
-$from = parse_date((string)($_GET['from'] ?? date('Y-m-d')));
-$to = parse_date((string)($_GET['to'] ?? date('Y-m-d')));
+$fromDateStr = trim((string)($_GET['from'] ?? date('Y-m-d')));
+$toDateStr = trim((string)($_GET['to'] ?? date('Y-m-d')));
+
+$morningStart = '08:00';
+$nightEnd = '02:30';
+try {
+  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','night_shift_end')");
+  foreach ($ssStmt->fetchAll() as $ss) {
+    if ($ss['setting_key'] === 'morning_shift_start') $morningStart = $ss['setting_value'];
+    if ($ss['setting_key'] === 'night_shift_end') $nightEnd = $ss['setting_value'];
+  }
+} catch (Throwable $ignore) {}
+
+$from = $fromDateStr ? date('Y-m-d H:i:s', strtotime("{$fromDateStr} {$morningStart}")) : null;
+
+// Adjust overnight boundary for the "to" date
+$toTimeStr = $nightEnd;
+$adjustedToDateStr = $toDateStr;
+if ($morningStart > $toTimeStr) {
+  $adjustedToDateStr = date('Y-m-d', strtotime($toDateStr . ' +1 day'));
+}
+$to = $toDateStr ? date('Y-m-d H:i:s', strtotime("{$adjustedToDateStr} {$toTimeStr}")) : null;
+
 $customerId = (int)($_GET['customer_id'] ?? 0);
 
 $where = ["gs.end_time IS NOT NULL", "gs.is_voided = 0"];
 $params = [];
 
-if ($from) { $where[] = "DATE(gs.end_time) >= ?"; $params[] = $from; }
-if ($to) { $where[] = "DATE(gs.end_time) <= ?"; $params[] = $to; }
+if ($from) { $where[] = "gs.end_time >= ?"; $params[] = $from; }
+if ($to) { $where[] = "gs.end_time <= ?"; $params[] = $to; }
 if ($customerId > 0) { $where[] = "gs.customer_id = ?"; $params[] = $customerId; }
 
 $sql = "
@@ -62,8 +83,8 @@ $gameRows = $stmt->fetchAll();
 // Also fetch Kubo rentals
 $kuboWhere = ["kr.status = 'completed'", "kr.is_voided = 0"];
 $kuboParams = [];
-if ($from) { $kuboWhere[] = "DATE(kr.end_time) >= ?"; $kuboParams[] = $from; }
-if ($to) { $kuboWhere[] = "DATE(kr.end_time) <= ?"; $kuboParams[] = $to; }
+if ($from) { $kuboWhere[] = "kr.end_time >= ?"; $kuboParams[] = $from; }
+if ($to) { $kuboWhere[] = "kr.end_time <= ?"; $kuboParams[] = $to; }
 
 $kuboSql = "
   SELECT
@@ -135,11 +156,11 @@ render_header('Transactions', 'transactions');
   <form id="txFilterForm" method="get" class="row" style="margin-top:12px; gap:10px;">
     <div class="field">
       <div class="label">From</div>
-      <input type="date" name="from" value="<?php echo h((string)$from); ?>" style="width:170px;" onchange="this.form.submit()">
+      <input type="date" name="from" value="<?php echo h((string)$fromDateStr); ?>" style="width:170px;" onchange="this.form.submit()">
     </div>
     <div class="field">
       <div class="label">To</div>
-      <input type="date" name="to" value="<?php echo h((string)$to); ?>" style="width:170px;" onchange="this.form.submit()">
+      <input type="date" name="to" value="<?php echo h((string)$toDateStr); ?>" style="width:170px;" onchange="this.form.submit()">
     </div>
     <div class="field" style="min-width:240px;">
       <div class="label">Customer</div>

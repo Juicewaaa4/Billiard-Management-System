@@ -12,18 +12,28 @@ try {
   db()->exec("ALTER TABLE game_sessions ADD COLUMN loyalty_hours INT NOT NULL DEFAULT 0");
 } catch (Throwable $e) {}
 
+$morningStart = '08:00';
+$nightEnd = '02:30';
+try {
+  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','night_shift_end')");
+  foreach ($ssStmt->fetchAll() as $ss) {
+    if ($ss['setting_key'] === 'morning_shift_start') $morningStart = $ss['setting_value'];
+    if ($ss['setting_key'] === 'night_shift_end') $nightEnd = $ss['setting_value'];
+  }
+} catch (Throwable $ignore) {}
+
 $fromDateStr = trim((string) ($_GET['from_date'] ?? $_GET['from'] ?? date('Y-m-d')));
 $fromTimeStr = trim((string) ($_GET['from_time'] ?? ''));
-if ($fromTimeStr === '') $fromTimeStr = '00:00';
+if ($fromTimeStr === '') $fromTimeStr = $morningStart;
 
 $toDateStr = trim((string) ($_GET['to_date'] ?? $_GET['to'] ?? date('Y-m-d')));
 $toTimeStr = trim((string) ($_GET['to_time'] ?? ''));
-if ($toTimeStr === '') $toTimeStr = '23:59';
+if ($toTimeStr === '') $toTimeStr = $nightEnd;
 
-// Auto-adjust overnight shifts (e.g. 08:00 AM to 05:00 AM the next day)
-// If the user selects the same calendar date for both fields but the to_time is earlier than from_time,
-// it logically implies they meant 5:00 AM of the NEXT morning.
-if ($fromDateStr === $toDateStr && $fromTimeStr > $toTimeStr) {
+// Auto-adjust overnight shifts (e.g. 08:00 AM to 02:30 AM the next day)
+// If the to_time is numerically earlier than from_time, it implies the shift crosses midnight.
+// Therefore, the end boundary should be the next calendar day relative to the selected 'to' date.
+if ($fromTimeStr > $toTimeStr) {
   $toDateStr = date('Y-m-d', strtotime($toDateStr . ' +1 day'));
 }
 
@@ -99,196 +109,69 @@ header('Content-Disposition: attachment; filename="' . $exportFilename . '"');
 echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
 echo '<head><meta charset="UTF-8"></head><body>';
 
-echo '<table border="0" style="margin-bottom:8px; font-family: Calibri, sans-serif;">';
-echo '<tr><td colspan="8" style="background-color:#c2e5b8; font-weight:bold; text-align:center; font-size:14px;">WALK IN</td></tr>';
-$dateDisplay = $from ? date('m-d-y', strtotime($from)) : date('m-d-y');
-echo '<tr><td colspan="8" style="font-size:12px; font-weight:bold; color:#000;">DATE: ' . $dateDisplay . '</td></tr>';
-echo '<tr><td colspan="8"></td></tr>';
-echo '</table>';
+echo '<table border="1" style="border-collapse: collapse; font-family: Calibri, sans-serif;">';
 
-$morningStart = '08:00';
-$eveningStart = '16:30';
-try {
-  $ssStmt = db()->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('morning_shift_start','evening_shift_start')");
-  foreach ($ssStmt->fetchAll() as $ss) {
-    if ($ss['setting_key'] === 'morning_shift_start') $morningStart = $ss['setting_value'];
-    if ($ss['setting_key'] === 'evening_shift_start') $eveningStart = $ss['setting_value'];
-  }
-} catch (Throwable $ignore) {}
-$mStartMins = ((int)explode(':', $morningStart)[0]) * 60 + ((int)(explode(':', $morningStart)[1] ?? 0));
-$eStartMins = ((int)explode(':', $eveningStart)[0]) * 60 + ((int)(explode(':', $eveningStart)[1] ?? 0));
+// Headers matching the screenshot exactly
+echo '<tr>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Transaction ID</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Table</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Player</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Time Range</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Duration</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Total Cost (P)</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Cashier</th>';
+echo '<th style="background-color: #2F5496; color: white; font-weight: bold; text-align: center;">Transaction Date</th>';
+echo '</tr>';
 
-function getShiftTrans($startTime, $mMin, $eMin) {
-    $ts = strtotime($startTime);
-    $hm = ((int)date('G', $ts)) * 60 + ((int)date('i', $ts));
-    if ($eMin > $mMin) {
-        return ($hm >= $mMin && $hm < $eMin) ? 'MORNING' : 'EVENING';
-    } else {
-        return ($hm >= $mMin || $hm < $eMin) ? 'MORNING' : 'EVENING';
-    }
-}
-
-$shifts = [
-  'MORNING' => ['rows' => [], 'breakdown' => []],
-  'EVENING' => ['rows' => [], 'breakdown' => []]
-];
-
-for($i=1; $i<=8; $i++) {
-   $shifts['MORNING']['breakdown']["TABLE $i"] = 0;
-   $shifts['EVENING']['breakdown']["TABLE $i"] = 0;
-}
-$shifts['MORNING']['breakdown']["VIP ROOM"] = 0;
-$shifts['MORNING']['breakdown']["KTV ROOM"] = 0;
-$shifts['EVENING']['breakdown']["VIP ROOM"] = 0;
-$shifts['EVENING']['breakdown']["KTV ROOM"] = 0;
-
+$rowIndex = 0;
 foreach ($rows as $r) {
-   $shift = getShiftTrans($r['start_time'], $mStartMins, $eStartMins);
-   
-   $tName = strtoupper($r['table_number']);
-   $tType = $r['table_type'];
-   
-   if ($tType === 'vip') $key = 'VIP ROOM';
-   elseif ($tType === 'ktv') $key = 'KTV ROOM';
-   else $key = 'TABLE ' . preg_replace('/[^0-9]/', '', $tName);
-   
-   if (!isset($shifts[$shift]['breakdown'][$key])) {
-       $shifts[$shift]['breakdown'][$key] = 0;
-   }
-   
-   $shifts[$shift]['breakdown'][$key] += (float)$r['total_cost'];
-   
-   if ($tType === 'regular') {
-       // Only regular tables go to the main list
-       $shifts[$shift]['rows'][] = $r;
-   }
+    $dur = (int) ($r['duration_seconds'] ?? 0);
+    $h = intdiv($dur, 3600);
+    $m = intdiv($dur % 3600, 60);
+    $s = $dur % 60;
+    $durationFmt = sprintf('%d:%02d:%02d', $h, $m, $s);
+    
+    $startTimeStr = date('g:i A', strtotime($r['start_time']));
+    $schedEndTimeStr = !empty($r['scheduled_end_time']) ? date('g:i A', strtotime($r['scheduled_end_time'])) : date('g:i A', strtotime($r['end_time']));
+    $gameTime = $startTimeStr . ' - ' . $schedEndTimeStr;
+    
+    // Exact format: '06/01/2026 10:38 AM
+    $transactionDate = "'" . date('m/d/Y h:i A', strtotime($r['end_time']));
+    
+    $tableName = 'Table ' . preg_replace('/[^0-9]/', '', (string)$r['table_number']);
+    if ($r['table_type'] === 'vip') $tableName = 'VIP Room ' . preg_replace('/[^0-9]/', '', (string)$r['table_number']);
+    if ($r['table_type'] === 'ktv') $tableName = 'KTV Room ' . preg_replace('/[^0-9]/', '', (string)$r['table_number']);
+    if (!empty($r['karaoke_included'])) $tableName .= ' (KTV)';
+    
+    $playerName = (string) $r['player_name'];
+    if (!empty($r['is_promo'])) {
+        $playerName .= ' + EB';
+    }
+    
+    $cost = (float) $r['total_cost'];
+    
+    $bgColor = ($rowIndex % 2 === 0) ? '#D9E1F2' : '#FFFFFF';
+    
+    // Loyalty and promo overrides
+    if (!empty($r['loyalty_hours'])) {
+        $bgColor = '#fdba74';
+    } elseif (!empty($r['is_promo'])) {
+        $bgColor = '#fbcfe8';
+    }
+
+    echo '<tr style="background-color: ' . $bgColor . ';">';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">TX-' . htmlspecialchars((string) $r['session_id']) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars($tableName) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars($playerName) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars($gameTime) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars($durationFmt) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;" x:num="' . $cost . '">' . $cost . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars((string) $r['cashier']) . '</td>';
+    echo '<td style="text-align: center; border: 1px solid #ccc;">' . htmlspecialchars($transactionDate) . '</td>';
+    echo '</tr>';
+    
+    $rowIndex++;
 }
-
-echo '<table border="0" style="border-collapse: collapse;">';
-
-$headersHtml = '
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Transaction ID</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Table ID</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Players</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Time Range (Duration)</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Game Time</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Total Cost (₱)</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Cashier Name</th>
-    <th style="background-color: #66BB6A; color: white; font-weight: bold; text-align: center; border: 1px solid #ccc;">Transaction Date</th>';
-
-$excelRow = 4; // Start at row 4 because of the header table above
-
-foreach (['MORNING', 'EVENING'] as $shiftKey) {
-   $sRows = $shifts[$shiftKey]['rows'];
-   $bDown = $shifts[$shiftKey]['breakdown'];
-   $bKeys = array_keys($bDown);
-   
-   $numBreakdownRows = count($bKeys) + 2; // header + data + total
-   $numMainRows = count($sRows) + 1; // data + total
-   
-   $maxRows = max($numMainRows, $numBreakdownRows);
-   
-   echo '<tr>' . $headersHtml . '<td style="border:none; width:20px;"></td><td colspan="2" style="border:none;"></td></tr>';
-   $excelRow++;
-   
-   $shiftTotalCost = 0;
-   $totalFormulaStart = $excelRow + 1; // Row where breakdown data begins (+1 for the header)
-   $totalFormulaEnd = $excelRow + count($bKeys); 
-   
-   $mainTotalFormulaStart = $excelRow;
-   $mainTotalFormulaEnd = $excelRow + count($sRows) - 1;
-   
-   for ($i = 0; $i < $maxRows; $i++) {
-      echo '<tr>';
-      
-      // -- MAIN TABLE COLUMNS (8 cols) --
-      if ($i < count($sRows)) {
-         $r = $sRows[$i];
-         $dur = (int) ($r['duration_seconds'] ?? 0);
-         $h = intdiv($dur, 3600);
-         $m = intdiv($dur % 3600, 60);
-         $s = $dur % 60;
-         $durationFmt = sprintf('%d:%02d:%02d', $h, $m, $s);
-         
-         $startTimeStr = date('g:i A', strtotime($r['start_time']));
-         $schedEndTimeStr = !empty($r['scheduled_end_time']) ? date('g:i A', strtotime($r['scheduled_end_time'])) : date('g:i A', strtotime($r['end_time']));
-         $gameTime = $startTimeStr . ' - ' . $schedEndTimeStr;
-         
-         // Transaction Date shows the exact date & time the cashier ended it
-         $transactionDate = "'" . date('m/d/Y h:i A', strtotime($r['end_time']));
-         
-         $tableName = 'Table ' . preg_replace('/[^0-9]/', '', (string)$r['table_number']);
-         if (!empty($r['karaoke_included'])) $tableName .= ' (KTV)';
-         
-         $playerName = (string) $r['player_name'];
-         if (!empty($r['is_promo'])) {
-             $playerName .= ' + EB';
-         }
-         
-         $cost = (float) $r['total_cost'];
-         $shiftTotalCost += $cost;
-         
-         // Row colors
-         $bgStyle = "";
-         if (!empty($r['loyalty_hours'])) {
-             $bgStyle = "background-color: #fdba74;"; // LOYALTY CARD (orange)
-         } elseif (!empty($r['is_promo'])) {
-             $bgStyle = "background-color: #fbcfe8;"; // EB PROMO (pink)
-         }
-         
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">TX-' . htmlspecialchars((string) $r['session_id']) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($tableName) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($playerName) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($durationFmt) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($gameTime) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '" x:num="' . $cost . '">' . $cost . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars((string) $r['cashier']) . '</td>';
-         echo '<td style="text-align: center; border: 1px solid #ccc; ' . $bgStyle . '">' . htmlspecialchars($transactionDate) . '</td>';
-         
-      } elseif ($i === count($sRows)) {
-         echo '<td colspan="4" style="border:none;"></td>';
-         echo '<td style="text-align: center; font-weight: bold; background-color: #fcd5b4; border: 1px solid #ccc;">TOTAL</td>';
-         // F is the 6th column (Total Cost)
-         echo '<td style="text-align: center; font-weight: bold; background-color: #fcd5b4; border: 1px solid #ccc;" x:num="' . $shiftTotalCost . '" x:fmla="=SUM(F'.$mainTotalFormulaStart.':F'.$mainTotalFormulaEnd.')">' . number_format($shiftTotalCost, 2) . '</td>';
-         echo '<td colspan="2" style="border:none;"></td>';
-      } else {
-         echo '<td colspan="8" style="border:none;"></td>';
-      }
-      
-      // -- SPACER (Column I) --
-      echo '<td style="border:none; width:20px;"></td>';
-      
-      // -- BREAKDOWN COLUMNS (Columns J & K) --
-      if ($i === 0) {
-         echo '<td colspan="2" style="font-weight:bold; text-align:center; border: none;">' . $shiftKey . ' BREAKDOWN</td>';
-      } elseif ($i <= count($bKeys)) {
-         $k = $bKeys[$i - 1];
-         $v = $bDown[$k];
-         echo '<td style="border: none; text-align: center;">' . htmlspecialchars($k) . '</td>';
-         $vDisp = $v == 0 ? '0.00' : number_format($v, 2, '.', '');
-         echo '<td style="border: none; text-align: center;" x:num="' . $v . '">' . $vDisp . '</td>';
-      } elseif ($i === count($bKeys) + 1) {
-         echo '<td style="font-weight:bold; text-align: center; background-color:#fcd5b4; border: 1px solid #ccc;">TOTAL</td>';
-         // K is the 11th column (Breakdown Amount)
-         echo '<td style="font-weight:bold; text-align: center; background-color:#fcd5b4; border: 1px solid #ccc;" x:num="' . array_sum($bDown) . '" x:fmla="=SUM(K'.$totalFormulaStart.':K'.$totalFormulaEnd.')">₱' . number_format(array_sum($bDown), 2, '.', '') . '</td>';
-      } else {
-         echo '<td colspan="2" style="border:none;"></td>';
-      }
-      
-      echo '</tr>';
-      $excelRow++;
-   }
-   
-   // Empty row between shifts
-   echo '<tr><td colspan="11" style="border:none; height:20px;"></td></tr>';
-   $excelRow++;
-}
-
-echo '<tr><td colspan="8" style="border:none;"></td><td style="border:none;"></td><td style="background-color:#9ca3af; border:1px solid #ccc;">NO TRANSACTION</td><td style="border:1px solid #ccc;"></td></tr>';
-echo '<tr><td colspan="8" style="border:none;"></td><td style="border:none;"></td><td style="background-color:#fbcfe8; border:1px solid #ccc;">EB PROMO</td><td style="border:1px solid #ccc;"></td></tr>';
-echo '<tr><td colspan="8" style="border:none;"></td><td style="border:none;"></td><td style="background-color:#fef08a; border:1px solid #ccc;">NO/WRONG UPDATE</td><td style="border:1px solid #ccc;"></td></tr>';
-echo '<tr><td colspan="8" style="border:none;"></td><td style="border:none;"></td><td style="background-color:#60a5fa; border:1px solid #ccc;">FOR ADJUSTMENT (EXTENDED)</td><td style="border:1px solid #ccc;"></td></tr>';
-echo '<tr><td colspan="8" style="border:none;"></td><td style="border:none;"></td><td style="background-color:#fdba74; border:1px solid #ccc;">LOYALTY CARD</td><td style="border:1px solid #ccc;"></td></tr>';
 
 echo '</table>';
 
@@ -326,7 +209,7 @@ if (!empty($voidRows)) {
   echo '<br><br>';
   echo '<table border="1" style="font-family: Calibri, sans-serif; margin-top:20px;">';
   echo '<tr>';
-  echo '<th colspan="8" style="background-color: #ef4444; color: white; font-weight: bold; font-size: 14px; padding: 5px;">VOIDED SESSIONS</th>';
+  echo '<th style="background-color: #ef4444; color: white; font-weight: bold; font-size: 14px; padding: 5px;">VOIDED SESSIONS</th>' . str_repeat('<th style="background-color: #ef4444;"></th>', 7);
   echo '</tr>';
   echo '<tr>';
   echo '<th style="background-color: #fca5a5; font-weight: bold;">Session ID</th>';
@@ -365,7 +248,7 @@ if (!empty($voidRows)) {
   }
   
   echo '<tr>';
-  echo '<td colspan="7" style="text-align: right; font-weight: bold;">TOTAL VOIDED AMOUNT:</td>';
+  echo str_repeat('<td></td>', 6) . '<td style="text-align: right; font-weight: bold;">TOTAL VOIDED AMOUNT:</td>';
   echo '<td style="text-align: right; color: #ef4444; font-weight: bold; font-size: 14px;">₱' . number_format($totalVoidedAmount, 2) . '</td>';
   echo '</tr>';
   
