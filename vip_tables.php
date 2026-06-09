@@ -178,9 +178,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $rate = (float) $table['rate_per_hour'];
       $total = round($rate * $hours, 2);
 
-      if (round($payment, 2) < round($total, 2) - 0.01)
-        throw new RuntimeException('Payment not enough. Required: ₱' . number_format($total, 2));
-      $change = round($payment - $total, 2);
+      $requiredPay = max(0, $total - $downPayment);
+      if (round($payment, 2) < round($requiredPay, 2) - 0.01)
+        throw new RuntimeException('Payment not enough. Required: ₱' . number_format($requiredPay, 2) . ' (DP applied: ₱' . number_format($downPayment, 2) . ')');
+      
+      $change = round($payment - $requiredPay, 2);
 
       db()->beginTransaction();
       db()->prepare("UPDATE tables SET status='in_use' WHERE id=?")->execute([$tableId]);

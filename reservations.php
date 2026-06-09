@@ -341,10 +341,12 @@ render_header('Reservations', 'reservations');
         <?php endif; ?>
 
         <!-- Actions -->
-        <?php if ($isPending): ?>
+        <?php if ($isPending): 
+          $targetEndpoint = in_array($r['type'], ['vip', 'ktv']) ? 'vip_tables.php' : 'tables.php';
+        ?>
           <div style="display:flex; gap:8px;">
             <a class="btn btn--primary" style="flex:1; text-align:center; text-decoration:none; font-size:13px;"
-               href="tables.php?start_reservation=<?php echo (int)$r['id']; ?>">Start</a>
+               href="<?php echo $targetEndpoint; ?>?start_reservation=<?php echo (int)$r['id']; ?>">Start</a>
             <button class="btn btn--ghost btn--block" style="flex:1; font-size:13px;" type="button" onclick="openCancelModal(<?php echo (int)$r['id']; ?>, '<?php echo addslashes(h($r['customer_name'])); ?>')">Cancel</button>
             <button class="btn btn--ghost" style="flex-shrink:0; font-size:13px; padding:8px;" type="button" title="Mark as No-show" onclick="openNoShowModal(<?php echo (int)$r['id']; ?>, '<?php echo addslashes(h($r['customer_name'])); ?>')">No Show</button>
           </div>
