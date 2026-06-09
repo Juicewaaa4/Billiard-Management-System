@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/auth.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/util.php';
 
 header('Content-Type: application/json');
 
@@ -68,6 +69,8 @@ try {
   }
 
   db()->commit();
+
+  flash_set('ok', 'Game session voided successfully.');
 
   echo json_encode(['ok' => true]);
 } catch (Throwable $e) {

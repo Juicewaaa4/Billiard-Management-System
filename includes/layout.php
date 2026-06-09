@@ -269,8 +269,8 @@ function render_footer(): void
       }
 
       let globalAlertedSessions = new Set();
-      // Using localStorage so it doesn't pop up again even if they refresh the page
       let globalAlertedWarnings = new Set();
+      // Using localStorage so it doesn't pop up again even if they refresh the page
 
       function closeGlobalTimeoutModal() {
         document.getElementById('globalTimeoutModal').style.display = 'none';
@@ -285,11 +285,16 @@ function render_footer(): void
           .then(res => res.json())
           .then(data => {
             if (data.status === 'ok') {
-               // Handle warnings 
-               // Clean up warned_ keys when a session has expired OR was manually ended
+               // Clean up warned_ and expired_ keys when a session has expired OR was manually ended
                const toClean = [...(data.expired || []), ...(data.ended || [])];
                if (toClean.length > 0) {
-                 toClean.forEach(s => localStorage.removeItem('warned_' + s.session_id));
+                 toClean.forEach(s => {
+                   localStorage.removeItem('warned_' + s.session_id);
+                   if (data.ended && data.ended.find(e => e.session_id === s.session_id)) {
+                     // Only remove expired_ key if it actually ENDED, not just expired
+                     localStorage.removeItem('expired_' + s.session_id);
+                   }
+                 });
                }
 
                if (data.warnings && data.warnings.length > 0) {
@@ -335,9 +340,11 @@ function render_footer(): void
                // Handle expired ones (Alarm modal overrides toast)
                if (data.expired && data.expired.length > 0) {
                  const session = data.expired[0]; // just show the first expired one
+                 const expiredKey = 'expired_' + session.session_id;
                  
-                 if (!globalAlertedSessions.has(session.session_id)) {
+                 if (!globalAlertedSessions.has(session.session_id) && !localStorage.getItem(expiredKey)) {
                    globalAlertedSessions.add(session.session_id);
+                   localStorage.setItem(expiredKey, '1');
                    playGlobalAlarmSound();
                    
                    const isKuboKaraoke = session.type === 'kubo';

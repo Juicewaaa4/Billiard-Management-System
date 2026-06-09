@@ -271,12 +271,14 @@
                 <td><?php echo h($rv['customer_name']); ?></td>
                 <td><?php echo $hours; ?>h</td>
                 <td><?php echo $dp > 0 ? '₱'.number_format($dp,2) : '—'; ?></td>
-                <td>
+                <td style="display:flex; gap:4px; border:none; padding-top:6px; justify-content:flex-end;">
                   <?php if ($canStart): ?>
-                    <button type="button" onclick="openDshStartResModal(<?php echo (int)$rv['id']; ?>, <?php echo (int)$rv['table_id']; ?>, '<?php echo $endpoint; ?>', '<?php echo h($rv['table_number']); ?>', '<?php echo h(addslashes($rv['customer_name'])); ?>', <?php echo $rate; ?>, <?php echo $hours; ?>, <?php echo $dp; ?>)" class="btn" style="padding:4px 10px; font-size:11px; background:#22c55e; color:white; border:none;">▶ Start</button>
+                    <button type="button" onclick="openDshStartResModal(<?php echo (int)$rv['id']; ?>, <?php echo (int)$rv['table_id']; ?>, '<?php echo $endpoint; ?>', '<?php echo h($rv['table_number']); ?>', '<?php echo h(addslashes($rv['customer_name'])); ?>', <?php echo $rate; ?>, <?php echo $hours; ?>, <?php echo $dp; ?>)" class="btn" style="padding:4px 8px; font-size:11px; background:#22c55e; color:white; border:none;" title="Start Reservation">▶ Start</button>
                   <?php else: ?>
-                    <span style="font-size:11px; color:var(--muted);">Upcoming</span>
+                    <span style="font-size:11px; color:var(--muted); margin-right:6px;">Upcoming</span>
                   <?php endif; ?>
+                  <button type="button" onclick="openDshCancelModal(<?php echo (int)$rv['id']; ?>, '<?php echo h(addslashes($rv['customer_name'])); ?>')" class="btn btn--danger" style="padding:4px 8px; font-size:11px; background:#ef4444; color:white; border:none;" title="Cancel Reservation">✖ Cancel</button>
+                  <button type="button" onclick="openDshNoShowModal(<?php echo (int)$rv['id']; ?>, '<?php echo h(addslashes($rv['customer_name'])); ?>')" class="btn btn--ok" style="padding:4px 8px; font-size:11px; background:#f59e0b; color:white; border:none;" title="Mark as No Show">🫥 No Show</button>
                 </td>
               </tr>
             <?php endforeach; ?>
@@ -441,6 +443,54 @@
   </div>
 </div>
 
+<!-- ═══ DASHBOARD CANCEL RESERVATION MODAL ═══ -->
+<div id="dshCancelModal" class="game-modal" style="display:none; z-index:10000;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>🛑 Cancel Reservation</h3>
+      <span class="game-modal__close" onclick="document.getElementById('dshCancelModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post" action="reservations.php">
+      <input type="hidden" name="return_url" value="dashboard.php">
+      <input type="hidden" name="action" value="cancel_reservation">
+      <input type="hidden" name="id" id="dsh_cancel_res_id">
+      <div class="game-modal__body" style="text-align:center; padding:28px 24px;">
+        <div style="width:56px; height:56px; margin:0 auto 16px; border-radius:50%; background:rgba(239,68,68,0.12); display:flex; align-items:center; justify-content:center; font-size:28px;">📅</div>
+        <p style="color:var(--text); font-size:15px; margin:0 0 8px;">Are you sure you want to cancel the reservation for <strong id="dshCancelCustomerName"></strong>?</p>
+        <p style="color:var(--muted); font-size:13px; margin:0;">This action cannot be undone.</p>
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:24px;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('dshCancelModal').style.display='none'">Go Back</button>
+          <button type="submit" class="btn btn--danger">Cancel Reservation</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ DASHBOARD NO SHOW MODAL ═══ -->
+<div id="dshNoShowModal" class="game-modal" style="display:none; z-index:10000;">
+  <div class="game-modal__box" style="max-width:400px;">
+    <div class="game-modal__header">
+      <h3>🚫 Mark as No Show</h3>
+      <span class="game-modal__close" onclick="document.getElementById('dshNoShowModal').style.display='none'">&times;</span>
+    </div>
+    <form method="post" action="reservations.php">
+      <input type="hidden" name="return_url" value="dashboard.php">
+      <input type="hidden" name="action" value="no_show">
+      <input type="hidden" name="id" id="dsh_noshow_res_id">
+      <div class="game-modal__body" style="text-align:center; padding:28px 24px;">
+        <div style="width:56px; height:56px; margin:0 auto 16px; border-radius:50%; background:rgba(245,158,11,0.12); display:flex; align-items:center; justify-content:center; font-size:28px;">🫥</div>
+        <p style="color:var(--text); font-size:15px; margin:0 0 8px;">Mark reservation for <strong id="dshNoshowCustomerName"></strong> as a no-show?</p>
+        <p style="color:var(--muted); font-size:13px; margin:0;">The table will be freed up for other customers.</p>
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:24px;">
+          <button type="button" class="btn btn--ghost" onclick="document.getElementById('dshNoShowModal').style.display='none'">Go Back</button>
+          <button type="submit" class="btn btn--primary" style="background:#f59e0b; border-color:#f59e0b; color:#fff;">Confirm No Show</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 // ── Available tables data (injected from PHP) ──
 const availData = {
@@ -569,11 +619,11 @@ function updateDshChange() {
 
 // Validate before submit
 document.getElementById('dshStartForm').addEventListener('submit', function(e) {
-  if (dshHours <= 0) { e.preventDefault(); alert('Please select hours.'); return; }
+  if (dshHours <= 0) { e.preventDefault(); showWarnModal('⏰ Select Hours', 'Please select how many hours to play.'); return; }
   const effectiveRate = dshPromo ? dshRate * 0.5 : dshRate;
   const total = effectiveRate * dshHours;
   const pay = parseFloat(document.getElementById('dshPayment').value) || 0;
-  if (pay < total - 0.01) { e.preventDefault(); alert('Payment not enough. Required: ₱' + total.toFixed(2)); }
+  if (pay < total - 0.01) { e.preventDefault(); showWarnModal('💰 Payment Not Enough', 'Payment is not enough. Required: ₱' + total.toFixed(2)); }
 });
 
 // ── Kubo Modals ──
@@ -637,10 +687,10 @@ function updateSkChange() {
 }
 
 document.getElementById('startKaraokeForm').addEventListener('submit', function(e) {
-  if (skHours <= 0) { e.preventDefault(); alert('Please select hours.'); return; }
+  if (skHours <= 0) { e.preventDefault(); showWarnModal('⏰ Select Hours', 'Please select how many hours for Karaoke.'); return; }
   const cost = skRate * skHours;
   const pay = parseFloat(document.getElementById('skPayment').value) || 0;
-  if (pay < cost - 0.01) { e.preventDefault(); alert('Payment not enough.'); }
+  if (pay < cost - 0.01) { e.preventDefault(); showWarnModal('💰 Payment Not Enough', 'Payment is not enough. Required: ₱' + cost.toFixed(2)); }
 });
 
 // ── Reservations Modal ──
@@ -692,8 +742,23 @@ document.getElementById('startResForm').addEventListener('submit', function(e) {
   const total = srRate * srHours;
   const reqPay = Math.max(0, total - srDp);
   const pay = parseFloat(document.getElementById('srPayment').value) || 0;
-  if (pay < reqPay - 0.01) { e.preventDefault(); alert('Payment not enough. Required: ₱' + reqPay.toFixed(2)); }
+  if (pay < reqPay - 0.01) { e.preventDefault(); showWarnModal('💰 Payment Not Enough', 'Payment is not enough. Required: ₱' + reqPay.toFixed(2)); }
 });
+
+function openDshCancelModal(id, customerName) {
+  document.getElementById('dshResModal').style.display = 'none'; // Close list modal
+  document.getElementById('dsh_cancel_res_id').value = id;
+  document.getElementById('dshCancelCustomerName').textContent = customerName;
+  document.getElementById('dshCancelModal').style.display = 'flex';
+}
+
+function openDshNoShowModal(id, customerName) {
+  document.getElementById('dshResModal').style.display = 'none'; // Close list modal
+  document.getElementById('dsh_noshow_res_id').value = id;
+  document.getElementById('dshNoshowCustomerName').textContent = customerName;
+  document.getElementById('dshNoShowModal').style.display = 'flex';
+}
+
 function openDshAddResModal() {
   document.getElementById('dshResModal').style.display = 'none'; // Close list modal
   dshCurrentSlots = [];
