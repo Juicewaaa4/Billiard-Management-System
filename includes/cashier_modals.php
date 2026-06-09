@@ -656,10 +656,14 @@ function openDshStartKaraokeModal(tableId, tableName, rate, custName) {
   document.getElementById('skPayment').value = '';
   document.getElementById('skChange').textContent = '₱0.00';
   document.querySelectorAll('#skHourButtons .hour-btn').forEach(b => b.classList.remove('selected'));
+  
+  skRate = rate; // Dynamically assign the rate!
+  skHours = 0;   // Reset hours
+  
   document.getElementById('startKaraokeModal').style.display = 'flex';
 }
 
-let skRate = 100, skHours = 0;
+let skRate = 0, skHours = 0;
 document.querySelectorAll('#skHourButtons .hour-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#skHourButtons .hour-btn').forEach(b => b.classList.remove('selected'));
