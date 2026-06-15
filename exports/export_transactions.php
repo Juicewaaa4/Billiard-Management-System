@@ -77,12 +77,17 @@ $sql = "
     gs.is_promo,
     COALESCE(gs.loyalty_hours, 0) AS loyalty_hours,
     gs.rate_per_hour,
+    gs.reservation_id,
+    r.reservation_date AS r_date,
+    r.start_time AS r_start,
+    r.duration_hours AS r_duration,
     MIN(u.username) AS cashier,
     COUNT(tx.id) AS tx_count
   FROM game_sessions gs
   JOIN tables t ON t.id = gs.table_id
   LEFT JOIN transactions tx ON gs.id = tx.session_id
   LEFT JOIN customers c ON c.id = gs.customer_id
+  LEFT JOIN reservations r ON r.id = gs.reservation_id
   LEFT JOIN users u ON u.id = tx.created_by
   WHERE " . implode(' AND ', $where) . "
   GROUP BY gs.id
@@ -130,9 +135,15 @@ foreach ($rows as $r) {
     $m = intdiv($dur % 3600, 60);
     $s = $dur % 60;
     $durationFmt = sprintf('%d:%02d:%02d', $h, $m, $s);
-    
-    $startTimeStr = date('g:i A', strtotime($r['start_time']));
-    $schedEndTimeStr = !empty($r['scheduled_end_time']) ? date('g:i A', strtotime($r['scheduled_end_time'])) : date('g:i A', strtotime($r['end_time']));
+    if (!empty($r['r_start'])) {
+        $resStartTs = strtotime($r['r_date'] . ' ' . $r['r_start']);
+        $resEndTs = $resStartTs + ((float)$r['r_duration'] * 3600);
+        $startTimeStr = date('g:i A', $resStartTs);
+        $schedEndTimeStr = date('g:i A', $resEndTs);
+    } else {
+        $startTimeStr = date('g:i A', strtotime($r['start_time']));
+        $schedEndTimeStr = !empty($r['scheduled_end_time']) ? date('g:i A', strtotime($r['scheduled_end_time'])) : date('g:i A', strtotime($r['end_time']));
+    }
     $gameTime = $startTimeStr . ' - ' . $schedEndTimeStr;
     
     // Exact format: '06/01/2026 10:38 AM

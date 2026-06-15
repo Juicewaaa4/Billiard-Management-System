@@ -90,7 +90,7 @@ if ($to) {
 $whereGsStr = count($whereGs) ? " AND " . implode(" AND ", $whereGs) : "";
 
 $sessionsStmt = db()->prepare("
-    SELECT gs.*, r.down_payment, c.name as c_name, t.table_number, t.type as table_type, u.username as cashier_name
+    SELECT gs.*, r.down_payment, r.reservation_date as r_date, r.start_time as r_start, r.duration_hours as r_duration, c.name as c_name, t.table_number, t.type as table_type, u.username as cashier_name
     FROM game_sessions gs
     JOIN tables t ON t.id = gs.table_id
     LEFT JOIN reservations r ON r.id = gs.reservation_id
@@ -159,12 +159,20 @@ foreach ($noShows as $ns) {
 }
 
 foreach ($sessions as $s) {
-    $startTimeTs = strtotime($s['start_time']);
-    $endTime = $s['end_time'] ?? $s['scheduled_end_time'];
-    $endTimeTs = strtotime($endTime);
-    $durSecs = (int) $s['duration_seconds'];
-    if ($durSecs == 0) {
-        $durSecs = max(0, $endTimeTs - $startTimeTs);
+    if (!empty($s['r_start'])) {
+        // It's a reservation - use the exact scheduled time
+        $startTimeTs = strtotime($s['r_date'] . ' ' . $s['r_start']);
+        $durSecs = (float)$s['r_duration'] * 3600;
+        $endTimeTs = (int)($startTimeTs + $durSecs);
+    } else {
+        // Walk-in VIP/KTV - use actual played time
+        $startTimeTs = strtotime($s['start_time']);
+        $endTime = $s['end_time'] ?? $s['scheduled_end_time'];
+        $endTimeTs = strtotime($endTime);
+        $durSecs = (int) $s['duration_seconds'];
+        if ($durSecs == 0) {
+            $durSecs = max(0, $endTimeTs - $startTimeTs);
+        }
     }
 
     $h = intdiv((int) $durSecs, 3600);
@@ -172,7 +180,7 @@ foreach ($sessions as $s) {
     $sec = $durSecs % 60;
     $totalTimeFmt = sprintf('%02d:%02d:%02d', $h, $m, $sec);
 
-    $shiftForRow = getShiftLabel($s['start_time'], $morningStartMinutes, $eveningStartMinutes);
+    $shiftForRow = getShiftLabel(date('Y-m-d H:i:s', $startTimeTs), $morningStartMinutes, $eveningStartMinutes);
     if ($shiftFilter === 'morning' && $shiftForRow !== 'MORNING')
         continue;
     if ($shiftFilter === 'evening' && $shiftForRow !== 'EVENING')
